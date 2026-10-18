@@ -2,14 +2,16 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const store = require('./db');
-const mt = require('./midtrans');
+const payments = require('./payments');
+const suppliers = require('./suppliers');
+const fulfill = require('./fulfill');
 const v = require('./views');
 
 const PROD = process.env.NODE_ENV === 'production';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (PROD ? '' : 'admin');
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD belum diset: login admin dinonaktifkan.');
-if (!mt.enabled()) console.warn('Midtrans belum dikonfigurasi: berjalan dalam mode demo.');
+if (!payments.anyEnabled()) console.warn('Belum ada gateway pembayaran aktif: berjalan dalam mode demo.');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -30,16 +32,25 @@ const safeEq = (a, b) => {
 };
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Produk bisa dibeli bila ada stok lokal ATAU ada pemasok cadangan yang aktif
+const decorate = (p) => {
+  const viaSupplier = store.listSources(p.id).some((s) => suppliers.get(s.supplier)?.enabled());
+  p.viaSupplier = viaSupplier;
+  p.orderable = p.available > 0 || viaSupplier;
+  p.maxQty = viaSupplier ? 10 : Math.min(p.available, 10);
+  return p;
+};
+
 // ---------- Toko ----------
 app.get('/', (req, res) => {
   const c = req.query.c ? String(req.query.c) : null;
-  res.send(v.home(store.listProducts(true, c), store.categories(), c));
+  res.send(v.home(store.listProducts(true, c).map(decorate), store.categories(), c));
 });
 
 app.get('/product/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p || !p.active) return res.status(404).send(v.notFound());
-  res.send(v.productPage(p));
+  res.send(v.productPage(decorate(p)));
 });
 
 app.post(
@@ -51,86 +62,98 @@ app.post(
     const contact = String(req.body.contact || '').trim().slice(0, 80);
     const p = store.getProduct(productId);
     if (!p || !p.active) return res.status(404).send(v.notFound());
-    if (!name || !contact) return res.status(400).send(v.productPage(p, 'Nama dan kontak wajib diisi'));
+    decorate(p);
+    const fail = (status, msg) => res.status(status).send(v.productPage(decorate(store.getProduct(productId)), msg));
+    if (!name || !contact) return fail(400, 'Nama dan kontak wajib diisi');
+    if (PROD && !payments.anyEnabled()) return fail(503, 'Pembayaran belum tersedia');
 
     let order;
     try {
-      order = store.createOrder({ productId, qty, name, contact });
+      order = store.createOrder({ productId, qty, name, contact, backorder: p.viaSupplier });
     } catch (e) {
-      return res.status(400).send(v.productPage(store.getProduct(productId), e.message));
+      return fail(400, e.message);
     }
-    const url = `/order/${order.id}?k=${order.access_key}`;
-    if (mt.enabled()) {
+    if (payments.anyEnabled()) {
       try {
-        const token = await mt.createSnapToken(order, p.name, baseUrl(req) + url);
-        store.db.prepare('UPDATE orders SET snap_token = ? WHERE id = ?').run(token, order.id);
+        await payments.createAttempt(order, p.name, baseUrl(req));
       } catch (e) {
-        console.error(e);
+        console.error(e.message);
         store.markFailed(order.id);
-        return res.status(502).send(v.productPage(p, 'Gagal membuat pembayaran, coba lagi.'));
+        return fail(502, 'Semua metode pembayaran sedang gangguan, coba lagi sebentar lagi.');
       }
     }
-    res.redirect(url);
+    res.redirect(`/order/${order.id}?k=${order.access_key}`);
   })
 );
+
+const ownOrder = (req) => {
+  const o = store.getOrder(req.params.id);
+  return o && safeEq(o.access_key, req.query.k || '') ? o : null;
+};
 
 app.get(
   '/order/:id',
   wrap(async (req, res) => {
-    let o = store.getOrder(req.params.id);
-    if (!o || !safeEq(o.access_key, req.query.k || '')) return res.status(404).send(v.notFound());
-    // Sinkronkan status langsung ke Midtrans bila webhook belum masuk
-    if (o.status === 'pending' && mt.enabled()) {
-      try {
-        const n = await mt.fetchStatus(o.id);
-        const r = mt.interpret(n);
-        if (r === 'paid' && Number(n.gross_amount) === o.amount) store.fulfillOrder(o.id);
-        else if (r === 'failed') store.markFailed(o.id);
-        o = store.getOrder(o.id);
-      } catch (e) {
-        console.error('sync status', e.message);
-      }
-    }
-    // paid_nostock bisa terpenuhi otomatis saat stok sudah ditambah
-    if (o.status === 'paid_nostock') {
-      store.fulfillOrder(o.id);
-      o = store.getOrder(o.id);
-    }
-    const items = o.status === 'paid' ? store.orderItems(o.id) : [];
+    let o = ownOrder(req);
+    if (!o) return res.status(404).send(v.notFound());
+    if (o.status === 'pending') await fulfill.syncPayments(o.id); // jaga-jaga webhook terlambat
+    fulfill.retryLocal(o);
+    o = store.getOrder(o.id);
+    const items = o.status.startsWith('paid') ? store.orderItems(o.id) : [];
+    const labels = Object.fromEntries(Object.entries(payments.providers).map(([k, p]) => [k, p.label]));
     res.set('Cache-Control', 'no-store');
     res.send(
       v.orderPage(o, items, {
-        midtrans: mt.enabled(),
-        clientKey: mt.clientKey(),
-        snapBase: mt.snapBase(),
-        demo: !mt.enabled() && !PROD,
+        attempts: store.attemptsOf(o.id),
+        labels,
+        canSwitch: payments.anyEnabled(),
+        demo: !payments.anyEnabled() && !PROD,
+        error: req.query.e,
       })
     );
   })
 );
 
-// Mode demo: hanya aktif bila Midtrans belum diset dan bukan production
-app.post('/order/:id/simulate', (req, res) => {
-  if (mt.enabled() || PROD) return res.status(403).send('Tidak tersedia');
-  const o = store.getOrder(req.params.id);
-  if (!o || !safeEq(o.access_key, req.query.k || '')) return res.status(404).send(v.notFound());
-  store.fulfillOrder(o.id);
-  res.redirect(`/order/${o.id}?k=${o.access_key}`);
-});
+// Pembeli minta tagihan baru / pindah metode: coba gateway lain dulu, jatuh ke yang sama bila hanya satu
+app.post(
+  '/order/:id/pay',
+  wrap(async (req, res) => {
+    const o = ownOrder(req);
+    if (!o || o.status !== 'pending') return res.status(404).send(v.notFound());
+    const last = store.attemptsOf(o.id).at(-1);
+    const back = `/order/${o.id}?k=${o.access_key}`;
+    const others = payments.enabledNames().filter((n) => n !== last?.provider);
+    try {
+      await payments.createAttempt(o, o.product_name, baseUrl(req), others.length ? [last?.provider] : []);
+      res.redirect(back);
+    } catch (e) {
+      console.error(e.message);
+      res.redirect(back + '&e=' + encodeURIComponent('Semua metode pembayaran sedang gangguan, coba lagi nanti.'));
+    }
+  })
+);
 
-// Webhook Midtrans (set di Dashboard Midtrans > Settings > Payment > Notification URL)
-app.post('/midtrans/notify', (req, res) => {
-  const n = req.body || {};
-  if (!mt.enabled() || !mt.validSignature(n)) return res.status(403).send('invalid signature');
-  const o = store.getOrder(n.order_id);
-  if (!o) return res.status(404).send('unknown order');
-  const r = mt.interpret(n);
-  if (r === 'paid') {
-    if (Number(n.gross_amount) !== o.amount) return res.status(400).send('amount mismatch');
-    store.fulfillOrder(o.id);
-  } else if (r === 'failed') store.markFailed(o.id);
-  res.send('ok');
-});
+// Mode demo: hanya aktif bila belum ada gateway dan bukan production
+app.post(
+  '/order/:id/simulate',
+  wrap(async (req, res) => {
+    if (payments.anyEnabled() || PROD) return res.status(403).send('Tidak tersedia');
+    const o = ownOrder(req);
+    if (!o) return res.status(404).send(v.notFound());
+    await fulfill.settle(o.id);
+    res.redirect(`/order/${o.id}?k=${o.access_key}`);
+  })
+);
+
+// Webhook per gateway. Daftarkan di dashboard: https://<domain>/pay/<midtrans|xendit>/notify
+const notify = (name) => (req, res) => {
+  const n = payments.providers[name].parseWebhook(req);
+  if (!n) return res.status(403).send('invalid signature');
+  const r = fulfill.onPayment(n.ref, n.result, n.amount);
+  res.status(r === 'mismatch' ? 400 : 200).send(r === 'unknown' ? 'ignored' : r);
+};
+for (const name of Object.keys(payments.providers)) app.post(`/pay/${name}/notify`, notify(name));
+app.post('/midtrans/notify', notify('midtrans')); // alias lama
 
 // ---------- Admin ----------
 const cookieOf = (req, name) =>
@@ -165,18 +188,57 @@ app.use('/admin', requireAdmin);
 
 app.get('/admin', (req, res) => {
   const orders = store.db
-    .prepare('SELECT o.*, p.name AS product_name FROM orders o JOIN products p ON p.id = o.product_id ORDER BY o.created_at DESC, o.rowid DESC LIMIT 200')
+    .prepare(
+      `SELECT o.*, p.name AS product_name,
+        COALESCE((SELECT provider FROM payment_attempts a WHERE a.order_id = o.id AND a.status IN ('paid','paid_duplicate') ORDER BY a.rowid LIMIT 1),
+                 (SELECT provider FROM payment_attempts a WHERE a.order_id = o.id ORDER BY a.rowid DESC LIMIT 1)) AS gateway,
+        (SELECT COUNT(*) FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate') AS dup,
+        (SELECT COUNT(*) FROM supplier_tx t WHERE t.order_id = o.id AND t.status = 'unknown') AS unknown_tx
+       FROM orders o JOIN products p ON p.id = o.product_id ORDER BY o.created_at DESC, o.rowid DESC LIMIT 200`
+    )
     .all();
   const s = store.db
-    .prepare("SELECT COUNT(*) orders, SUM(status IN ('paid','paid_nostock')) paid, COALESCE(SUM(CASE WHEN status IN ('paid','paid_nostock') THEN amount END),0) revenue FROM orders")
+    .prepare("SELECT COUNT(*) orders, SUM(status LIKE 'paid%') paid, COALESCE(SUM(CASE WHEN status LIKE 'paid%' THEN amount END),0) revenue FROM orders")
     .get();
   res.send(v.adminOrders(orders, { orders: s.orders, paid: s.paid || 0, revenue: s.revenue }));
 });
 
 app.post('/admin/orders/:id/fulfill', (req, res) => {
-  store.fulfillOrder(req.params.id);
+  fulfill.settle(req.params.id).catch((e) => console.error('[settle]', e));
   res.redirect('/admin');
 });
+
+app.get(
+  '/admin/status',
+  wrap(async (req, res) => {
+    const gateways = payments.priority().map((n) => ({ label: payments.providers[n].label, enabled: payments.providers[n].enabled() }));
+    const list = await Promise.all(
+      Object.values(suppliers.adapters()).map(async (a) => {
+        const row = { name: a.name, label: a.label, enabled: a.enabled(), hasCatalog: Boolean(a.catalog) };
+        if (row.enabled && a.balance) {
+          try {
+            row.balance = await a.balance();
+          } catch (e) {
+            row.balance = 'error: ' + e.message;
+          }
+        }
+        return row;
+      })
+    );
+    res.send(v.adminStatus({ gateways, suppliers: list }));
+  })
+);
+
+app.get(
+  '/admin/suppliers/:name/catalog',
+  wrap(async (req, res) => {
+    const a = suppliers.get(req.params.name);
+    if (!a || !a.enabled() || !a.catalog) return res.status(404).send(v.notFound());
+    const q = String(req.query.q || '').toLowerCase();
+    const rows = (await a.catalog()).filter((r) => !q || `${r.sku} ${r.name}`.toLowerCase().includes(q)).slice(0, 200);
+    res.send(v.adminCatalog(a.label, rows, req.query.q || ''));
+  })
+);
 
 app.get('/admin/products', (req, res) => res.send(v.adminProducts(store.listProducts(false))));
 
@@ -200,7 +262,7 @@ app.get('/admin/products/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p) return res.status(404).send(v.notFound());
   const stock = store.db.prepare('SELECT * FROM stock WHERE product_id = ? ORDER BY id DESC').all(p.id);
-  res.send(v.adminProduct(p, stock));
+  res.send(v.adminProduct(p, stock, store.listSources(p.id), Object.keys(suppliers.adapters())));
 });
 
 app.post('/admin/products/:id', (req, res) => {
@@ -225,6 +287,20 @@ app.post('/admin/stock/:id/delete', (req, res) => {
   res.redirect(s ? '/admin/products/' + s.product_id : '/admin/products');
 });
 
+app.post('/admin/products/:id/sources', (req, res) => {
+  const id = Number(req.params.id);
+  const supplier = String(req.body.supplier || '');
+  const sku = String(req.body.sku || '').trim().slice(0, 100);
+  if (suppliers.get(supplier) && sku) store.addSource(id, supplier, sku, Math.max(1, parseInt(req.body.priority, 10) || 1));
+  res.redirect('/admin/products/' + id);
+});
+
+app.post('/admin/sources/:id/delete', (req, res) => {
+  const s = store.db.prepare('SELECT product_id FROM product_sources WHERE id = ?').get(Number(req.params.id));
+  store.deleteSource(Number(req.params.id));
+  res.redirect(s ? '/admin/products/' + s.product_id : '/admin/products');
+});
+
 app.get('/healthz', (req, res) => res.send('ok'));
 app.use((req, res) => res.status(404).send(v.notFound()));
 app.use((err, req, res, next) => {
@@ -233,4 +309,7 @@ app.use((err, req, res, next) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Toko berjalan di http://localhost:${port}`));
+app.listen(port, () => {
+  console.log(`Toko berjalan di http://localhost:${port}`);
+  fulfill.startWorker();
+});

@@ -27,9 +27,19 @@ services:
         sync: false
       - key: BASE_URL
         sync: false
+      - key: PAYMENT_PRIORITY
+        value: midtrans,xendit
       - key: MIDTRANS_SERVER_KEY
-        sync: false
-      - key: MIDTRANS_CLIENT_KEY
         sync: false
       - key: MIDTRANS_IS_PRODUCTION
         value: "false"
+      - key: XENDIT_SECRET_KEY
+        sync: false
+      - key: XENDIT_CALLBACK_TOKEN
+        sync: false
+      - key: DIGIFLAZZ_USERNAME
+        sync: false
+      - key: DIGIFLAZZ_API_KEY
+        sync: false
+      - key: SUPPLIERS_JSON
+        sync: false
