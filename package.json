@@ -1,0 +1,16 @@
+{
+  "name": "toko-digital",
+  "version": "1.0.0",
+  "description": "Toko produk digital (akun/token Netflix, CapCut, Canva, ChatGPT, Claude, YouTube, dll) dengan pembayaran Midtrans",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
