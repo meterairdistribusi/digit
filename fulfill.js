@@ -2,6 +2,7 @@ const store = require('./db');
 const suppliers = require('./suppliers');
 const payments = require('./payments');
 const { health } = require('./http');
+const notify = require('./notify');
 
 const inflight = new Set();
 
@@ -24,7 +25,7 @@ async function sourceOrder(orderId) {
       const a = suppliers.get(tx.supplier);
       if (!a || !a.enabled() || !a.idempotent) continue;
       try {
-        applyResult(order, tx, await a.buy({ sku: tx.sku, ref: tx.ref, customer: order.contact }));
+        applyResult(order, tx, await (a.check || a.buy).call(a, { sku: tx.sku, ref: tx.ref, customer: order.contact, prev: tx.message }));
       } catch (e) {
         console.error('[sourcing] cek ulang gagal', tx.ref, e.message);
       }
@@ -74,6 +75,8 @@ async function sourceOrder(orderId) {
     // 3) Tentukan status akhir
     const done = store.allocatedCount(orderId) >= order.qty;
     store.setOrderStatus(orderId, done ? 'paid' : count('pending') > 0 ? 'paid_sourcing' : 'paid_nostock');
+    if (count('unknown') > 0) notify.alert(`Pesanan ${orderId}: transaksi pemasok tidak pasti, cek manual di dashboard pemasok.`);
+    await notify.announce(orderId);
   } finally {
     inflight.delete(orderId);
   }
@@ -83,6 +86,7 @@ async function sourceOrder(orderId) {
 async function settle(orderId) {
   const r = store.fulfillLocal(orderId);
   if (r && r.missing > 0) await sourceOrder(orderId);
+  else await notify.announce(orderId);
 }
 
 // Satu pintu untuk semua kabar pembayaran (webhook maupun cek status). Idempotent.
@@ -101,6 +105,7 @@ function onPayment(ref, result, amount) {
   }
   const alreadyPaid = store.attemptsOf(o.id).some((x) => x.status === 'paid');
   store.setAttemptStatus(ref, alreadyPaid ? 'paid_duplicate' : 'paid'); // duplicate = pembeli bayar dua kali, perlu refund
+  if (alreadyPaid) notify.alert(`Pesanan ${o.id}: pembeli membayar dua kali (${ref}). Refund manual lewat dashboard gateway, lalu tandai di admin.`);
   if (!alreadyPaid) settle(o.id).catch((e) => console.error('[settle]', e));
   return 'ok';
 }

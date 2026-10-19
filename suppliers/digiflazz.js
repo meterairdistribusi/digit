@@ -11,8 +11,15 @@ const post = (path, body) =>
 module.exports = {
   name: 'digiflazz',
   label: 'Digiflazz',
+  region: 'ID',
+  verified: true,
   enabled: () => Boolean(user() && key()),
   idempotent: true, // ref_id yang sama mengembalikan status transaksi yang sama, aman untuk dicek ulang
+
+  // Digiflazz: ref_id yang sama mengembalikan status transaksi yang sama, jadi cek ulang = buy ulang
+  async check(args) {
+    return this.buy(args);
+  },
 
   async buy({ sku, ref, customer }) {
     const { data } = await post('/transaction', {

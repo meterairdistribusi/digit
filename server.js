@@ -5,6 +5,7 @@ const store = require('./db');
 const payments = require('./payments');
 const suppliers = require('./suppliers');
 const fulfill = require('./fulfill');
+const { health } = require('./http');
 const v = require('./views');
 
 const PROD = process.env.NODE_ENV === 'production';
@@ -69,7 +70,7 @@ app.post(
 
     let order;
     try {
-      order = store.createOrder({ productId, qty, name, contact, backorder: p.viaSupplier });
+      order = store.createOrder({ productId, qty, name, contact, backorder: p.viaSupplier, coupon: String(req.body.coupon || '') });
     } catch (e) {
       return fail(400, e.message);
     }
@@ -85,6 +86,34 @@ app.post(
     res.redirect(`/order/${order.id}?k=${order.access_key}`);
   })
 );
+
+// Lacak pesanan: ID + kontak saat checkout → diarahkan ke halaman pesanan. Dibatasi per IP agar ID tidak bisa ditebak.
+const tracks = new Map();
+app.get('/track', (req, res) => res.send(v.track()));
+app.post('/track', (req, res) => {
+  const t = tracks.get(req.ip) || { n: 0, at: Date.now() };
+  if (Date.now() - t.at > 15 * 60e3) (t.n = 0), (t.at = Date.now());
+  if (t.n >= 10) return res.status(429).send(v.track('Terlalu banyak percobaan, coba lagi nanti'));
+  const o = store.findOrderByContact(req.body.id, req.body.contact);
+  if (!o) {
+    tracks.set(req.ip, { n: t.n + 1, at: t.at });
+    return res.status(404).send(v.track('Pesanan tidak ditemukan. Periksa ID dan kontak yang dipakai saat checkout.'));
+  }
+  res.redirect(`/order/${o.id}?k=${o.access_key}`);
+});
+
+// Cek kupon untuk pratinjau di halaman produk
+app.get('/coupon/check', (req, res) => {
+  const p = store.getProduct(Number(req.query.product_id));
+  const qty = Math.min(10, Math.max(1, parseInt(req.query.qty, 10) || 1));
+  if (!p) return res.status(404).json({ ok: false });
+  try {
+    const c = store.applyCoupon(String(req.query.code || ''), p.price * qty);
+    res.json({ ok: true, discount: c.discount, total: p.price * qty - c.discount });
+  } catch (e) {
+    res.json({ ok: false, message: e.message });
+  }
+});
 
 const ownOrder = (req) => {
   const o = store.getOrder(req.params.id);
@@ -187,20 +216,45 @@ app.post('/admin/logout', (req, res) => {
 app.use('/admin', requireAdmin);
 
 app.get('/admin', (req, res) => {
-  const orders = store.db
-    .prepare(
-      `SELECT o.*, p.name AS product_name,
-        COALESCE((SELECT provider FROM payment_attempts a WHERE a.order_id = o.id AND a.status IN ('paid','paid_duplicate') ORDER BY a.rowid LIMIT 1),
-                 (SELECT provider FROM payment_attempts a WHERE a.order_id = o.id ORDER BY a.rowid DESC LIMIT 1)) AS gateway,
-        (SELECT COUNT(*) FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate') AS dup,
-        (SELECT COUNT(*) FROM supplier_tx t WHERE t.order_id = o.id AND t.status = 'unknown') AS unknown_tx
-       FROM orders o JOIN products p ON p.id = o.product_id ORDER BY o.created_at DESC, o.rowid DESC LIMIT 200`
-    )
-    .all();
-  const s = store.db
-    .prepare("SELECT COUNT(*) orders, SUM(status LIKE 'paid%') paid, COALESCE(SUM(CASE WHEN status LIKE 'paid%' THEN amount END),0) revenue FROM orders")
-    .get();
-  res.send(v.adminOrders(orders, { orders: s.orders, paid: s.paid || 0, revenue: s.revenue }));
+  const f = { status: String(req.query.status || ''), q: String(req.query.q || '').trim().slice(0, 60), page: parseInt(req.query.page, 10) || 1 };
+  res.send(v.adminOrders(store.searchOrders(f), store.orderStats(), f));
+});
+
+app.post('/admin/orders/:id/refund', (req, res) => {
+  if (store.markRefunded(req.params.id)) console.log('[refund] ditandai direfund:', req.params.id);
+  res.redirect(req.get('referer') || '/admin');
+});
+
+// ---------- Laporan ----------
+const reportDays = (req) => [7, 30, 90, 365].find((d) => d === parseInt(req.query.days, 10)) || 30;
+app.get('/admin/reports', (req, res) => {
+  const days = reportDays(req);
+  res.send(v.adminReports(store.salesReport(days), days));
+});
+app.get('/admin/reports.csv', (req, res) => {
+  const r = store.salesReport(reportDays(req));
+  const csv = ['tanggal,pesanan,pendapatan,diskon', ...r.daily.map((d) => [d.day, d.orders, d.revenue, d.discount].join(','))].join('\n');
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="penjualan.csv"' }).send(csv);
+});
+
+// ---------- Kupon ----------
+app.get('/admin/coupons', (req, res) => res.send(v.adminCoupons(store.listCoupons(), req.query.e)));
+app.post('/admin/coupons', (req, res) => {
+  const code = String(req.body.code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 30);
+  const type = req.body.type === 'fixed' ? 'fixed' : 'percent';
+  const value = parseInt(req.body.value, 10) || 0;
+  if (!code || value < 1 || (type === 'percent' && value > 100)) return res.redirect('/admin/coupons?e=' + encodeURIComponent('Kode/nilai kupon tidak valid'));
+  store.saveCoupon({
+    code, type, value,
+    minAmount: Math.max(0, parseInt(req.body.min_amount, 10) || 0),
+    maxUses: Math.max(0, parseInt(req.body.max_uses, 10) || 0),
+    expiresAt: /^\d{4}-\d{2}-\d{2}$/.test(req.body.expires_at || '') ? req.body.expires_at : null,
+  });
+  res.redirect('/admin/coupons');
+});
+app.post('/admin/coupons/:code/toggle', (req, res) => {
+  store.toggleCoupon(req.params.code);
+  res.redirect('/admin/coupons');
 });
 
 app.post('/admin/orders/:id/fulfill', (req, res) => {
@@ -214,7 +268,7 @@ app.get(
     const gateways = payments.priority().map((n) => ({ label: payments.providers[n].label, enabled: payments.providers[n].enabled() }));
     const list = await Promise.all(
       Object.values(suppliers.adapters()).map(async (a) => {
-        const row = { name: a.name, label: a.label, enabled: a.enabled(), hasCatalog: Boolean(a.catalog) };
+        const row = { name: a.name, label: a.label, region: a.region || '', verified: a.verified !== false, enabled: a.enabled(), hasCatalog: Boolean(a.catalog), healthy: health.ok('sup:' + a.name) };
         if (row.enabled && a.balance) {
           try {
             row.balance = await a.balance();
@@ -262,7 +316,7 @@ app.get('/admin/products/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p) return res.status(404).send(v.notFound());
   const stock = store.db.prepare('SELECT * FROM stock WHERE product_id = ? ORDER BY id DESC').all(p.id);
-  res.send(v.adminProduct(p, stock, store.listSources(p.id), Object.keys(suppliers.adapters())));
+  res.send(v.adminProduct(p, stock, store.listSources(p.id), Object.values(suppliers.adapters()).filter((a) => a.enabled()).map((a) => a.name)));
 });
 
 app.post('/admin/products/:id', (req, res) => {

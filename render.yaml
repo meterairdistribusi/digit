@@ -43,3 +43,35 @@ services:
         sync: false
       - key: SUPPLIERS_JSON
         sync: false
+      - key: VIPRESELLER_API_ID
+        sync: false
+      - key: VIPRESELLER_API_KEY
+        sync: false
+      - key: TOKOVOUCHER_MEMBER_CODE
+        sync: false
+      - key: TOKOVOUCHER_SECRET
+        sync: false
+      - key: APIGAMES_MERCHANT_ID
+        sync: false
+      - key: APIGAMES_SECRET
+        sync: false
+      - key: RELOADLY_CLIENT_ID
+        sync: false
+      - key: RELOADLY_CLIENT_SECRET
+        sync: false
+      - key: RELOADLY_FALLBACK_EMAIL
+        sync: false
+      - key: DINGCONNECT_API_KEY
+        sync: false
+      - key: FONNTE_TOKEN
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: RELOADLY_SANDBOX
+        value: "true"

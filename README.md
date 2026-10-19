@@ -33,22 +33,56 @@ Pembeli yang membayar dua tagihan sekaligus ditandai **⚠ dibayar ganda** di ad
 
 ## Pemasok / agregator
 
-- **Digiflazz**: isi `DIGIFLAZZ_USERNAME` dan `DIGIFLAZZ_API_KEY`. Di `/admin/status` ada saldo dan pencarian SKU. Transaksi pending dicek ulang otomatis dengan `ref_id` yang sama. Isi `DIGIFLAZZ_TESTING=true` untuk uji tanpa potong saldo.
-- **Agregator lain** (API HTTP/JSON sinkron) lewat env `SUPPLIERS_JSON`, tanpa ubah kode:
+Semua pemasok dipakai sebagai **cadangan berurutan**: per produk, tambahkan beberapa sumber (pemasok + SKU + prioritas). Bila satu gagal atau sedang gangguan, otomatis pindah ke berikutnya. Pemasok yang baru error dilewati 2 menit (circuit breaker) dan `/admin/status` menandainya.
+
+| Pemasok | Wilayah | Env | Catatan |
+|---|---|---|---|
+| Digiflazz | ID | `DIGIFLAZZ_USERNAME`, `DIGIFLAZZ_API_KEY` | Terverifikasi. Saldo, cari SKU, cek ulang otomatis. `DIGIFLAZZ_TESTING=true` untuk uji. |
+| VIP Reseller | ID | `VIPRESELLER_API_ID`, `VIPRESELLER_API_KEY` | Preset, **belum diuji** |
+| Tokovoucher | ID | `TOKOVOUCHER_MEMBER_CODE`, `TOKOVOUCHER_SECRET` | Preset, **belum diuji** |
+| Apigames | ID | `APIGAMES_MERCHANT_ID`, `APIGAMES_SECRET` | Preset, **belum diuji** |
+| Reloadly (gift card) | Luar negeri | `RELOADLY_CLIENT_ID`, `RELOADLY_CLIENT_SECRET`, `RELOADLY_SANDBOX`, `RELOADLY_FALLBACK_EMAIL` | SKU: `productId:harga:KODENEGARA`. **Belum diuji** |
+| DingConnect | Luar negeri | `DINGCONNECT_API_KEY` | Preset, **belum diuji** |
+| Lainnya | bebas | `SUPPLIERS_JSON` | Lihat di bawah |
+
+**Preset "belum diuji"** ditulis dari dokumentasi publik tanpa akun nyata. Sebelum dipakai: cocokkan dengan dokumentasi resmi penyedia, uji di sandbox/akun kecil, dan bila ada beda, timpa dengan entri bernama sama di `SUPPLIERS_JSON` (preset ada di `suppliers/presets.js`).
+
+### Agregator lain lewat `SUPPLIERS_JSON`
+
+Tanpa ubah kode. Mendukung GET/POST, body JSON atau `form`, tanda tangan, token OAuth, cek status async, dan saldo:
 
 ```json
 [{
-  "name": "agregatorku",
-  "url": "https://api.contoh.com/order",
-  "method": "POST",
-  "headers": { "Authorization": "Bearer ${AGREGATORKU_TOKEN}" },
-  "body": { "product": "{{sku}}", "trx_id": "{{ref}}", "target": "{{customer}}" },
-  "successPath": "status", "successValues": ["success"],
-  "contentPath": "data.voucher", "messagePath": "message"
+  "name": "agregatorku", "label": "Agregatorku", "region": "INT",
+  "url": "https://api.contoh.com/order", "method": "POST", "bodyType": "json",
+  "auth": { "url": "https://api.contoh.com/token", "body": { "id": "${AGR_ID}", "secret": "${AGR_SECRET}" }, "tokenPath": "access_token" },
+  "headers": { "Authorization": "Bearer {{token}}" },
+  "sign": { "algo": "md5", "template": "${AGR_ID}:${AGR_SECRET}:{{ref}}" },
+  "body": { "product": "{{sku}}", "trx_id": "{{ref}}", "target": "{{customer}}", "sign": "{{signature}}" },
+  "successPath": "status", "successValues": ["success"], "pendingValues": ["processing"],
+  "contentPath": "data.voucher", "messagePath": "message",
+  "check": { "url": "https://api.contoh.com/status/{{ref}}", "method": "GET" },
+  "balance": { "url": "https://api.contoh.com/balance", "method": "GET", "path": "data.balance" },
+  "requireEnv": ["AGR_ID", "AGR_SECRET"]
 }]
 ```
 
-`${NAMA_ENV}` diambil dari environment (rahasia tidak ditulis di JSON). Pemasok generik tidak dicek ulang otomatis; bila request timeout, transaksi ditandai **tidak pasti** dan pemasok lain tidak dicoba, supaya tidak membeli dua kali. Admin memeriksa manual.
+Placeholder: `{{sku}} {{ref}} {{customer}} {{signature}} {{token}}`, dan `${NAMA_ENV}` (rahasia tetap di env). `sign` mendukung `algo` md5/sha1/sha256 dan `hmacKey`. Dengan `check`, transaksi pending dicek ulang otomatis dengan `ref` yang sama. **Tanpa `check`**, respons dianggap final dan bila request timeout transaksi ditandai **tidak pasti** (pemasok lain tidak dicoba, supaya tidak membeli dua kali); admin memeriksa manual.
+
+## Fitur toko
+
+- **Kupon** (`/admin/coupons`): persen atau nominal, minimal belanja, kuota, tanggal kedaluwarsa. Kuota otomatis kembali bila pesanan gagal/kedaluwarsa.
+- **Lacak pesanan** (`/track`): pembeli memasukkan ID + kontak saat checkout untuk membuka kembali pesanannya (dibatasi per IP).
+- **Notifikasi**: pembeli dikabari lewat WhatsApp (Fonnte) atau email (Resend) saat pesanan siap, hanya berisi link, tidak pernah isi produk. Admin dikabari lewat Telegram bila stok/pemasok kosong, transaksi tak pasti, atau pembeli bayar dua kali.
+- **Laporan** (`/admin/reports`): pendapatan per hari/produk/gateway, keandalan pemasok, unduh CSV.
+- **Pesanan admin**: filter status, pencarian, halaman. Pembayaran ganda: refund dilakukan di dashboard gateway lalu ditandai **Tandai direfund** (refund otomatis lewat API belum ada).
+- **Docker** (`Dockerfile`) dan **CI** (`.github/workflows/ci.yml`, menjalankan `npm test`).
+
+## Tes
+
+```bash
+npm test    # node:test, tanpa dependensi tambahan
+```
 
 ## Deploy ke Render
 

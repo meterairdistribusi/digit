@@ -1,7 +1,9 @@
-const { loadGeneric } = require('./generic');
+const { loadGeneric, fromConfig } = require('./generic');
+const presets = require('./presets');
 
+// Urutan: bawaan → preset → SUPPLIERS_JSON (entri bernama sama menimpa yang sebelumnya)
 const adapters = () => {
-  const all = [require('./digiflazz'), ...loadGeneric()];
+  const all = [require('./digiflazz'), require('./reloadly'), ...presets.map(fromConfig), ...loadGeneric()];
   return Object.fromEntries(all.map((a) => [a.name, a]));
 };
 
