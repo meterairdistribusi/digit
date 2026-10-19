@@ -14,6 +14,8 @@ const MAX_AGE_MS = 30 * 24 * 3600e3;
 const SWITCH = {
   // id: [kunci setting, nilai untuk produksi, nilai untuk sandbox]
   midtrans: ['MIDTRANS_IS_PRODUCTION', 'true', 'false'],
+  tripay: ['TRIPAY_SANDBOX', 'false', 'true'],
+  ipaymu: ['IPAYMU_SANDBOX', 'false', 'true'],
   digiflazz: ['DIGIFLAZZ_TESTING', 'false', 'true'],
   reloadly: ['RELOADLY_SANDBOX', 'false', 'true'],
 };

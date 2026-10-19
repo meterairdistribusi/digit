@@ -7,8 +7,12 @@ const crypto = require('crypto');
 // Kendali uji: state.fail.<midtrans|xendit|agg> = true → layanan itu menjawab 500; state.refundFail = true → refund ditolak.
 
 async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-token' } = {}) {
+  const TRIPAY = { apiKey: 'trp-api-key', privateKey: 'trp-private-key', merchant: 'T0001' };
+  const IPAYMU = { va: '1179000899', key: 'ipaymu-api-key' };
   const state = {
     midtrans: new Map(), // order_id -> {amount, status}
+    tripay: new Map(), // merchant_ref -> {reference, amount, status}
+    ipaymu: new Map(), // referenceId -> {trx, amount, status}
     xendit: new Map(), // external_id -> {id, amount, status}
     refunds: [],
     supplierCalls: [],
@@ -18,7 +22,9 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
     stock: ['MOCK-CODE-1', 'MOCK-CODE-2', 'MOCK-CODE-3'],
   };
   const json = (res, code, body) => (res.writeHead(code, { 'Content-Type': 'application/json' }), res.end(JSON.stringify(body)));
-  const body = (req) => new Promise((ok) => { let d = ''; req.on('data', (c) => (d += c)); req.on('end', () => { try { ok(JSON.parse(d || '{}')); } catch { ok({}); } }); });
+  const body = (req) => new Promise((ok) => { let d = ''; req.on('data', (c) => (d += c)); req.on('end', () => { req._raw = d; try { ok(JSON.parse(d || '{}')); } catch { ok({}); } }); });
+  const hmac = (k, t) => crypto.createHmac('sha256', k).update(t).digest('hex');
+  const ipaymuAuthed = (req) => req.headers.va === IPAYMU.va && req.headers.signature === hmac(IPAYMU.key, `${req.method}:${IPAYMU.va}:${crypto.createHash('sha256').update(req._raw || '').digest('hex')}:${IPAYMU.key}`) && /^\d{14}$/.test(req.headers.timestamp || '');
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -73,6 +79,41 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
       return json(res, 200, { id: 'rfd-' + state.refunds.length, status: 'SUCCEEDED', amount: b.amount });
     }
 
+    // ----- Tripay -----
+    if (p.startsWith('/tripay/')) {
+      if (req.headers.authorization !== 'Bearer ' + TRIPAY.apiKey) return json(res, 401, { success: false, message: 'Invalid API key' });
+      if (p === '/tripay/merchant/payment-channel') return json(res, 200, { success: true, data: [{ code: 'QRIS' }, { code: 'BRIVA' }] });
+      if (p === '/tripay/transaction/create') {
+        if (state.fail.tripay) return json(res, 500, { success: false, message: 'mock down' });
+        if (b.signature !== hmac(TRIPAY.privateKey, TRIPAY.merchant + b.merchant_ref + b.amount)) return json(res, 400, { success: false, message: 'Invalid signature' });
+        if (!b.method || !b.customer_email || !b.return_url) return json(res, 422, { success: false, message: 'Field wajib kurang' });
+        const reference = 'T' + (state.tripay.size + 1000);
+        state.tripay.set(b.merchant_ref, { reference, amount: b.amount, status: 'UNPAID' });
+        return json(res, 200, { success: true, data: { reference, merchant_ref: b.merchant_ref, status: 'UNPAID', checkout_url: `${appUrl || ''}/mock/pay/tripay/${b.merchant_ref}`, pay_url: `${appUrl || ''}/mock/pay/tripay/${b.merchant_ref}` } });
+      }
+      if (p === '/tripay/transaction/detail') {
+        const t = [...state.tripay.entries()].find(([, v]) => v.reference === url.searchParams.get('reference'));
+        return t ? json(res, 200, { success: true, data: { reference: t[1].reference, merchant_ref: t[0], amount: t[1].amount, status: t[1].status } }) : json(res, 404, { success: false, message: 'Transaksi tidak ditemukan' });
+      }
+    }
+
+    // ----- iPaymu -----
+    if (p.startsWith('/ipaymu/')) {
+      if (!ipaymuAuthed(req)) return json(res, 401, { Status: 401, Success: false, Message: 'Invalid signature' });
+      if (p === '/ipaymu/balance') return json(res, 200, { Status: 200, Success: true, Data: { MerchantBalance: 100000 } });
+      if (p === '/ipaymu/payment') {
+        if (state.fail.ipaymu) return json(res, 500, { Status: 500, Success: false, Message: 'mock down' });
+        if (!b.referenceId || !b.returnUrl || !b.notifyUrl || !Array.isArray(b.price)) return json(res, 400, { Status: 400, Success: false, Message: 'Parameter tidak lengkap' });
+        const trx = 5000 + state.ipaymu.size;
+        state.ipaymu.set(b.referenceId, { trx, amount: b.price[0], status: 0 });
+        return json(res, 200, { Status: 200, Success: true, Data: { SessionID: 'S' + trx, Url: `${appUrl || ''}/mock/pay/ipaymu/${b.referenceId}` } });
+      }
+      if (p === '/ipaymu/transaction') {
+        const t = [...state.ipaymu.entries()].find(([, v]) => v.trx === Number(b.transactionId));
+        return t ? json(res, 200, { Status: 200, Success: true, Data: { TransactionId: t[1].trx, ReferenceId: t[0], Status: t[1].status, Amount: t[1].amount } }) : json(res, 200, { Status: 404, Success: false, Message: 'Transaksi tidak ditemukan' });
+      }
+    }
+
     // ----- Expo Push -----
     if (p === '/push/send' && req.method === 'POST') {
       const list = Array.isArray(b) ? b : [b];
@@ -96,7 +137,16 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
   const url = `http://127.0.0.1:${server.address().port}`;
 
   // Simulasikan pembeli membayar lalu gateway memanggil webhook aplikasi (dengan tanda tangan yang benar)
-  async function pay(provider, ref, { amount } = {}) {
+  async function pay(provider, ref, { amount, feeCustomer = 0, badSignature = false } = {}) {
+    if (provider === 'tripay') {
+      const t = state.tripay.get(ref); t.status = 'PAID';
+      const raw = JSON.stringify({ reference: t.reference, merchant_ref: ref, payment_method: 'QRIS', total_amount: (amount ?? t.amount) + feeCustomer, fee_customer: feeCustomer, status: 'PAID' });
+      return fetch(appUrl + '/pay/tripay/notify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Callback-Event': 'payment_status', 'X-Callback-Signature': badSignature ? 'deadbeef' : hmac(TRIPAY.privateKey, raw) }, body: raw });
+    }
+    if (provider === 'ipaymu') {
+      const t = state.ipaymu.get(ref); t.status = 1;
+      return fetch(appUrl + '/pay/ipaymu/notify', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ trx_id: String(t.trx), reference_id: ref, status: 'berhasil', status_code: '1', amount: String(amount ?? t.amount) }).toString() });
+    }
     if (provider === 'midtrans') {
       const t = state.midtrans.get(ref);
       t.status = 'paid';
@@ -115,7 +165,10 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
     });
   }
 
-  return { url, state, pay, midtransKey, xenditToken, close: () => new Promise((r) => server.close(r)) };
+  // Notifikasi iPaymu palsu (tanpa transaksi nyata di sisi gateway)
+  const forge = (fields) => fetch(appUrl + '/pay/ipaymu/notify', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields).toString() });
+
+  return { url, state, pay, forge, tripay: TRIPAY, ipaymu: IPAYMU, midtransKey, xenditToken, close: () => new Promise((r) => server.close(r)) };
 }
 
 module.exports = { start };

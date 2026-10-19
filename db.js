@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS coupons (
 );
 `);
 addColumn('orders', 'user_id', 'INTEGER');
+addColumn('payment_attempts', 'ext_ref', 'TEXT'); // ID transaksi di sisi gateway (mis. reference Tripay)
 addColumn('products', 'image', 'TEXT');
 addColumn('products', 'compare_at', 'INTEGER');
 addColumn('products', 'badge', "TEXT NOT NULL DEFAULT ''");
@@ -289,8 +290,8 @@ const markFailed = (orderId) =>
 const attemptsOf = (orderId) =>
   db.prepare('SELECT * FROM payment_attempts WHERE order_id = ? ORDER BY rowid').all(orderId);
 const getAttempt = (ref) => db.prepare('SELECT * FROM payment_attempts WHERE ref = ?').get(ref);
-const addAttempt = (orderId, provider, ref, payUrl) => {
-  db.prepare('INSERT INTO payment_attempts (ref, order_id, provider, pay_url) VALUES (?,?,?,?)').run(ref, orderId, provider, payUrl);
+const addAttempt = (orderId, provider, ref, payUrl, extRef = null) => {
+  db.prepare('INSERT INTO payment_attempts (ref, order_id, provider, pay_url, ext_ref) VALUES (?,?,?,?,?)').run(ref, orderId, provider, payUrl, extRef);
   return getAttempt(ref);
 };
 const setAttemptStatus = (ref, status) =>

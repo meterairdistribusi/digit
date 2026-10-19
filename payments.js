@@ -4,11 +4,13 @@ const { health } = require('./http');
 const providers = {
   midtrans: require('./providers/midtrans'),
   xendit: require('./providers/xendit'),
+  tripay: require('./providers/tripay'),
+  ipaymu: require('./providers/ipaymu'),
 };
 
 // Urutan prioritas gateway; ubah lewat env PAYMENT_PRIORITY=xendit,midtrans
 const priority = () =>
-  (process.env.PAYMENT_PRIORITY || 'midtrans,xendit')
+  (process.env.PAYMENT_PRIORITY || 'midtrans,xendit,tripay,ipaymu')
     .split(',')
     .map((s) => s.trim())
     .filter((n) => providers[n]);
@@ -24,9 +26,9 @@ async function createAttempt(order, productName, baseUrl, exclude = []) {
   for (const name of names) {
     const ref = `${order.id}-P${store.attemptsOf(order.id).length + 1}`;
     try {
-      const { payUrl } = await providers[name].create({ ref, order, productName, finishUrl });
+      const { payUrl, extRef } = await providers[name].create({ ref, order, productName, finishUrl });
       health.good('pay:' + name);
-      return store.addAttempt(order.id, name, ref, payUrl);
+      return store.addAttempt(order.id, name, ref, payUrl, extRef);
     } catch (e) {
       health.bad('pay:' + name);
       errors.push(`${name}: ${e.message}`);

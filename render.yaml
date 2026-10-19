@@ -28,7 +28,7 @@ services:
       - key: BASE_URL
         sync: false
       - key: PAYMENT_PRIORITY
-        value: midtrans,xendit
+        value: midtrans,xendit,tripay,ipaymu
       - key: MIDTRANS_SERVER_KEY
         sync: false
       - key: MIDTRANS_IS_PRODUCTION
@@ -74,4 +74,20 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
       - key: RELOADLY_SANDBOX
+        value: "true"
+      - key: TRIPAY_API_KEY
+        sync: false
+      - key: TRIPAY_PRIVATE_KEY
+        sync: false
+      - key: TRIPAY_MERCHANT_CODE
+        sync: false
+      - key: IPAYMU_VA
+        sync: false
+      - key: IPAYMU_API_KEY
+        sync: false
+      - key: TRIPAY_METHOD
+        value: QRIS
+      - key: TRIPAY_SANDBOX
+        value: "true"
+      - key: IPAYMU_SANDBOX
         value: "true"

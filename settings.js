@@ -36,7 +36,17 @@ const GROUPS = [
     help: 'Daftarkan webhook: {BASE_URL}/pay/xendit/notify. Kunci "xnd_development_…" = sandbox, "xnd_production_…" = produksi.',
     fields: [S('XENDIT_SECRET_KEY', 'Secret key'), S('XENDIT_CALLBACK_TOKEN', 'Callback verification token')],
   },
-  { id: 'pembayaran', label: 'Urutan gateway', fields: [F('PAYMENT_PRIORITY', 'Urutan prioritas', { help: 'Pisahkan koma, mis. midtrans,xendit' })] },
+  {
+    id: 'tripay', label: 'Tripay', kind: 'gateway',
+    help: 'Daftarkan Callback URL di dashboard Tripay: {BASE_URL}/pay/tripay/notify. Tripay tidak punya API refund (refund dicatat manual). Format API belum diuji akun nyata: uji di sandbox dulu.',
+    fields: [S('TRIPAY_API_KEY', 'API key'), S('TRIPAY_PRIVATE_KEY', 'Private key'), F('TRIPAY_MERCHANT_CODE', 'Kode merchant'), F('TRIPAY_METHOD', 'Metode bayar', { help: 'Kode channel Tripay, mis. QRIS, BRIVA, OVO. Bawaan: QRIS.' }), F('TRIPAY_SANDBOX', 'Mode sandbox', { hidden: true })],
+  },
+  {
+    id: 'ipaymu', label: 'iPaymu', kind: 'gateway',
+    help: 'Webhook dikirim otomatis ke {BASE_URL}/pay/ipaymu/notify dan diverifikasi ulang lewat API iPaymu. iPaymu tidak punya API refund (refund dicatat manual). Format API belum diuji akun nyata: uji di sandbox dulu.',
+    fields: [F('IPAYMU_VA', 'Virtual Account (VA)'), S('IPAYMU_API_KEY', 'API key'), F('IPAYMU_SANDBOX', 'Mode sandbox', { hidden: true })],
+  },
+  { id: 'pembayaran', label: 'Urutan gateway', fields: [F('PAYMENT_PRIORITY', 'Urutan prioritas', { help: 'Pisahkan koma, mis. midtrans,xendit,tripay,ipaymu. Gateway pertama yang aktif dipakai; bila gagal otomatis pindah ke berikutnya.' })] },
   { id: 'digiflazz', label: 'Digiflazz', kind: 'supplier', fields: [F('DIGIFLAZZ_USERNAME', 'Username'), S('DIGIFLAZZ_API_KEY', 'API key (production)'), F('DIGIFLAZZ_TESTING', 'Mode uji', { hidden: true })] },
   { id: 'vipreseller', label: 'VIP Reseller', kind: 'supplier', fields: [F('VIPRESELLER_API_ID', 'API ID'), S('VIPRESELLER_API_KEY', 'API key')] },
   { id: 'tokovoucher', label: 'Tokovoucher', kind: 'supplier', fields: [F('TOKOVOUCHER_MEMBER_CODE', 'Member code'), S('TOKOVOUCHER_SECRET', 'Secret')] },
