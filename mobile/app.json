@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Toko Digital",
+    "slug": "toko-digital",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "tokodigital",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#f6f7fb",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#5b4bff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "id.tokodigital.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "id.tokodigital.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#5b4bff",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "color": "#5b4bff",
+          "defaultChannel": "orders"
+        }
+      ]
+    ]
+  }
+}

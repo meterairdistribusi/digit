@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "sandbox:check": "node sandbox/check.js",
+    "sandbox:mock": "node sandbox/mock-gateways.js",
+    "demo": "node sandbox/demo.js",
+    "walkthrough": "node sandbox/walkthrough.js"
   },
   "engines": {
     "node": ">=22.13"

@@ -9,9 +9,33 @@ const headers = () => ({
 });
 const interpret = (s) => (['PAID', 'SETTLED'].includes(s) ? 'paid' : s === 'EXPIRED' ? 'failed' : 'pending');
 
+const REASONS = { duplicate: 'DUPLICATE', customer: 'REQUESTED_BY_CUSTOMER', cancel: 'CANCELLATION' };
+
 module.exports = {
   label: 'Xendit',
   enabled: () => Boolean(secretKey()),
+  mode: () => (secretKey().startsWith('xnd_production_') ? 'production' : 'sandbox'),
+
+  async selfTest() {
+    if (!secretKey()) return { ok: false, message: 'Secret key belum diisi' };
+    const { ok, status, data } = await fetchJson(base() + '/balance', { headers: headers() });
+    return ok ? { ok: true, message: 'Terhubung (saldo terbaca)' } : { ok: false, message: `${status}: ${data.message || JSON.stringify(data).slice(0, 150)}` };
+  },
+
+  // Refund invoice: cari id invoice Xendit dari external_id (= ref kita), lalu buat refund. Idempotency-key = refundKey.
+  async refund({ ref, amount, reason, refundKey, kind = 'duplicate' }) {
+    const found = await fetchJson(`${base()}/v2/invoices?external_id=${encodeURIComponent(ref)}`, { headers: headers() });
+    const inv = Array.isArray(found.data) ? found.data[0] : null;
+    if (!inv) return { status: 'failed', message: 'Invoice tidak ditemukan di Xendit' };
+    const { ok, data } = await fetchJson(base() + '/refunds', {
+      method: 'POST',
+      headers: { ...headers(), 'Idempotency-key': refundKey },
+      body: JSON.stringify({ invoice_id: inv.id, reference_id: refundKey, amount, reason: REASONS[kind] || 'OTHERS', metadata: { note: String(reason).slice(0, 100) } }),
+    });
+    if (!ok) return { status: 'failed', message: `${data.error_code || ''} ${data.message || JSON.stringify(data).slice(0, 150)}`.trim() };
+    const st = String(data.status || '').toUpperCase();
+    return { status: st === 'SUCCEEDED' ? 'succeeded' : st === 'FAILED' ? 'failed' : 'pending', providerRef: data.id, message: data.failure_code || st };
+  },
 
   async create({ ref, order, productName, finishUrl }) {
     const { ok, data } = await fetchJson(base() + '/v2/invoices', {
