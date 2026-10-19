@@ -184,7 +184,7 @@ function bigPng() {
   await step('Keluar lalu masuk dengan password baru; password lama ditolak', async () => {
     await acc.click('form[action="/logout"] button, button:has-text("Keluar")'); await acc.waitForURL(base + '/');
     await acc.goto(base + '/login'); await acc.fill('[name=email]', email); await acc.fill('[name=password]', 'rahasia123'); await acc.click('button.btn'); await acc.waitForSelector('.err');
-    await acc.fill('[name=password]', 'passwordbaru1'); await acc.click('button.btn'); await acc.waitForURL('**/account');
+    eq(await acc.inputValue('[name=email]'), email, 'email dipertahankan setelah salah password'); await acc.fill('[name=password]', 'passwordbaru1'); await acc.click('button.btn'); await acc.waitForURL('**/account');
   });
   await step('Hapus akun: salah password ditolak; benar → akun hilang, transaksi tetap ada', async () => {
     await acc.fill('details [name=password]', 'salah').catch(async () => { await acc.click('summary:has-text("Hapus akun")'); await acc.fill('details [name=password]', 'salah'); });
@@ -381,7 +381,7 @@ function bigPng() {
       mOrder = /ORD-[A-F0-9]+/.exec(await m.textContent('body'))[0]; ok(db.prepare('SELECT user_id FROM orders WHERE id=?').get(mOrder).user_id, 'pesanan terhubung ke akun');
     });
     await step('Bayar → status & produk muncul otomatis (polling), tombol Salin', async () => {
-      await payOrder(mOrder); await m.waitForSelector('text=Produk Anda', { timeout: 15000 }); ok(await m.locator('text=/@mail.com|@x.com|wt\\d+_\\d/').count(), 'isi produk'); await m.click('text=Salin'); await m.waitForSelector('text=Tersalin');
+      await payOrder(mOrder); await m.waitForSelector('text=Produk Anda', { timeout: 15000 }); ok(await m.locator('text=/@mail.com|@x.com|wt\\d+_\\d/').count(), 'isi produk'); await m.locator('text=Salin >> visible=true').last().click(); await m.waitForSelector('text=Tersalin');
     });
     await step('Tab Pesanan menampilkan riwayat; Akun: tema Gelap bekerja', async () => {
       await m.goto('http://localhost:3144'); await m.waitForSelector('text=Promo spesial'); await m.getByText('Pesanan saya', { exact: true }).last().click(); await m.waitForSelector('text=/Netflix Premium 1 Bulan ×\\s*1/');
@@ -389,7 +389,7 @@ function bigPng() {
       const lum = await m.evaluate(() => { const el = [...document.querySelectorAll('div')].find((d) => getComputedStyle(d).backgroundColor !== 'rgba(0, 0, 0, 0)'); const c = getComputedStyle(el).backgroundColor.match(/\d+/g).map(Number); return (c[0] + c[1] + c[2]) / 3; }); ok(lum < 60, 'gelap, kecerahan ' + lum);
     });
     await step('Dokumen hukum dari Akun; keluar akun', async () => {
-      await m.getByText('Kebijakan Privasi', { exact: true }).first().click(); await m.waitForSelector('text=Siapa kami'); await m.goBack().catch(() => {}); await m.goto('http://localhost:3144'); await m.getByText('Akun', { exact: true }).last().click(); await m.waitForSelector('text=Notifikasi pesanan');
+      await m.locator('text=Kebijakan Privasi >> visible=true').first().click(); await m.waitForSelector('text=Siapa kami'); await m.goBack().catch(() => {}); await m.goto('http://localhost:3144'); await m.getByText('Akun', { exact: true }).last().click(); await m.waitForSelector('text=Notifikasi pesanan');
       await m.getByText('Keluar', { exact: true }).last().click(); await m.waitForSelector('text=Masuk untuk membeli, melihat pesanan', { timeout: 6000 }).catch(async () => { await m.waitForSelector('text=Buat akun'); });
     });
     px.close();

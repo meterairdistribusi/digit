@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Alert, Linking, Modal, Share, Switch, Text, View } from 'react-native';
+import { Linking, Modal, Share, Switch, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { APP_VERSION } from '../config';
 import { useAuth } from '../auth';
 import { Button, Card, ErrorText, Field, H1, H2, Muted, Screen, Segmented, useLoad } from '../components/ui';
+import { ask, info } from '../dialog';
 import { usePush } from '../push';
 import type { Nav } from '../navigation';
 import { createStyles, space, useTheme } from '../theme';
@@ -69,10 +70,10 @@ export default function AccountScreen() {
   const exportData = async () => {
     setBusy('export');
     try { await Share.share({ title: 'Data saya', message: JSON.stringify(await api.exportData(), null, 2) }); }
-    catch (e) { Alert.alert('Gagal', errMsg(e)); } finally { setBusy(null); }
+    catch (e) { info('Gagal', errMsg(e)); } finally { setBusy(null); }
   };
 
-  const confirmLogout = () => Alert.alert('Keluar?', 'Anda perlu masuk lagi untuk membeli.', [{ text: 'Batal', style: 'cancel' }, { text: 'Keluar', onPress: () => void push.release().then(logout) }]);
+  const confirmLogout = () => ask('Keluar?', 'Anda perlu masuk lagi untuk membeli.', 'Keluar', () => void push.release().then(logout));
 
   const deleteAccount = async () => {
     setBusy('del'); setDelErr(null);
@@ -81,7 +82,7 @@ export default function AccountScreen() {
       await api.deleteAccount(delPw);
       setDelOpen(false); setDelPw('');
       await clearLocal();
-      Alert.alert('Akun dihapus', 'Akun Anda telah dihapus. Riwayat transaksi tetap disimpan tanpa tautan ke akun sesuai kewajiban pencatatan keuangan.');
+      info('Akun dihapus', 'Akun Anda telah dihapus. Riwayat transaksi tetap disimpan tanpa tautan ke akun sesuai kewajiban pencatatan keuangan.');
     } catch (e) { setDelErr(errMsg(e)); } finally { setBusy(null); }
   };
 

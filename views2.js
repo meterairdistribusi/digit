@@ -4,13 +4,13 @@ const { layout, rp, esc } = require('./views');
 const consent = `<label class="inline"><input type="checkbox" name="accept" value="1" required>
 Saya menyetujui <a href="/legal/terms" target="_blank">Syarat &amp; Ketentuan</a> dan <a href="/legal/privacy" target="_blank">Kebijakan Privasi</a></label>`;
 
-const userLogin = (error, next = '') =>
+const userLogin = (error, next = '', email = '') =>
   layout(
     'Masuk',
     `<div class="panel narrow"><h1>Masuk</h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <form method="post" action="/login" class="form"><input type="hidden" name="next" value="${esc(next)}">
-<label>Email<input type="email" name="email" required autocomplete="email"></label>
-<label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+<label>Email<input type="email" name="email" required autocomplete="email" value="${esc(email)}"></label>
+<label>Password<input type="password" name="password" required autocomplete="current-password"${email ? ' autofocus' : ''}></label>
 <button class="btn">Masuk</button></form>
 <p class="muted">Belum punya akun? <a href="/register">Daftar</a></p></div>`
   );
@@ -146,7 +146,7 @@ const adminsPage = (list, me, { msg, error }) =>
       )
       .join('')}</table></div>
 <div class="panel"><h2>Tambah admin</h2><p class="muted"><b>Pemilik</b>: semua akses termasuk Pengaturan, Integrasi, Admin, dan Refund. <b>Staf</b>: pesanan, produk, stok, kupon, laporan.</p>
-<form method="post" action="/admin/admins" class="form"><label>Username<input name="username" required pattern="[a-z0-9._\-]{3,32}" autocapitalize="none"></label>
+<form method="post" action="/admin/admins" class="form"><label>Username<input name="username" required pattern="[a-z0-9._\\-]{3,32}" autocapitalize="none"></label>
 <label>Password (min. 8)<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
 <label>Peran<select name="role"><option value="staff">Staf</option><option value="owner">Pemilik</option></select></label><button class="btn">Tambah</button></form></div>
 <div class="panel"><h2>Ganti password saya</h2><form method="post" action="/admin/me/password" class="form">
@@ -155,10 +155,10 @@ const adminsPage = (list, me, { msg, error }) =>
     { admin: true }
   );
 
-const adminMe = (a, error) =>
+const adminMe = (a, error, msg) =>
   layout(
     'Akun saya',
-    `<h1>${esc(a.username)} <small class="muted">(${a.role === 'owner' ? 'Pemilik' : 'Staf'})</small></h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
+    `<h1>${esc(a.username)} <small class="muted">(${a.role === 'owner' ? 'Pemilik' : 'Staf'})</small></h1>${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="panel"><h2>Ganti password</h2><form method="post" action="/admin/me/password" class="form">
 <label>Password lama<input type="password" name="old_password" required autocomplete="current-password"></label>
 <label>Password baru (min. 8)<input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label><button class="btn">Ganti</button></form></div>`,

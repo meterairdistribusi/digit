@@ -218,11 +218,11 @@ const needUser = (req, res, next) => (userOf(req) ? next() : res.redirect('/logi
 app.get('/login', (req, res) => res.send(v2.userLogin(null, req.query.next)));
 app.post('/login', (req, res) => {
   const key = 'ulogin:' + req.ip + ':' + String(req.body.email || '').toLowerCase();
-  if (blocked(key)) return res.status(429).send(v2.userLogin('Terlalu banyak percobaan, coba lagi nanti'));
+  if (blocked(key)) return res.status(429).send(v2.userLogin('Terlalu banyak percobaan, coba lagi nanti', req.body.next, req.body.email));
   const u = accounts.authUser(req.body.email, req.body.password);
   if (!u) {
     fail(key);
-    return res.status(401).send(v2.userLogin('Email atau password salah', req.body.next));
+    return res.status(401).send(v2.userLogin('Email atau password salah', req.body.next, req.body.email));
   }
   tries.delete(key);
   setUserCookie(res, accounts.createSession('user', u.id, 'web'));
@@ -613,7 +613,7 @@ app.post('/admin/admins/:id/toggle', requireOwner, (req, res) => {
 });
 app.post('/admin/admins/:id/password', requireOwner, (req, res) => guard(req, res, () => accounts.resetAdminPassword(Number(req.params.id), req.body.password), 'Password direset (sesi admin tersebut dicabut)'));
 // Siapa pun yang login (Pemilik/Staf) bisa mengganti password sendiri
-app.get('/admin/me', (req, res) => res.send(v2.adminMe(req.admin, req.query.e)));
+app.get('/admin/me', (req, res) => res.send(v2.adminMe(req.admin, req.query.e, req.query.m)));
 app.post('/admin/me/password', (req, res) => {
   try {
     accounts.changePassword('admin', req.admin.id, req.body.old_password, req.body.new_password);
