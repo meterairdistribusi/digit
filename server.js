@@ -31,7 +31,8 @@ app.disable('x-powered-by');
 app.use('/api/v1', api);
 const smallForm = express.urlencoded({ extended: false, limit: '100kb' });
 app.use((req, res, next) => (req.path.startsWith('/admin/products') ? next() : smallForm(req, res, next)));
-app.use(express.json());
+// rawBody: Tripay menandatangani badan mentah webhook, jadi harus disimpan sebelum di-parse
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.static(path.join(__dirname, 'public')));
 // Gambar produk hasil unggahan: nama berbasis hash (tak berubah) → cache panjang; tipe tetap + nosniff
 app.use('/uploads', (req, res, next) => express.static(uploads.dir(), { index: false, dotfiles: 'deny', maxAge: '365d', immutable: true, setHeaders: (r, f) => r.set({ 'X-Content-Type-Options': 'nosniff', 'Content-Type': uploads.typeOf(f), 'Content-Security-Policy': "default-src 'none'" }) })(req, res, next));
@@ -201,11 +202,21 @@ app.post(
 );
 
 // Webhook per gateway. Daftarkan di dashboard: https://<domain>/pay/<midtrans|xendit>/notify
-const notify = (name) => (req, res) => {
-  const n = payments.providers[name].parseWebhook(req);
+// parseWebhook boleh async (mis. iPaymu memverifikasi notifikasi lewat API) dan provider boleh menentukan balasan (`ack`)
+const notify = (name) => async (req, res) => {
+  const prov = payments.providers[name];
+  let n;
+  try {
+    n = await prov.parseWebhook(req);
+  } catch (e) {
+    console.error(`[webhook ${name}]`, e.message);
+    return res.status(502).send('verifikasi gagal, coba lagi'); // gateway akan mengirim ulang
+  }
   if (!n) return res.status(403).send('invalid signature');
   const r = fulfill.onPayment(n.ref, n.result, n.amount);
-  res.status(r === 'mismatch' ? 400 : 200).send(r === 'unknown' ? 'ignored' : r);
+  const code = r === 'mismatch' ? 400 : 200;
+  if (prov.ack && code === 200) return res.json(prov.ack);
+  res.status(code).send(r === 'unknown' ? 'ignored' : r);
 };
 for (const name of Object.keys(payments.providers)) app.post(`/pay/${name}/notify`, notify(name));
 app.post('/midtrans/notify', notify('midtrans')); // alias lama

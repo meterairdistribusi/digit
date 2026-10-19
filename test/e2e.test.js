@@ -43,6 +43,8 @@ test.before(async () => {
   process.env.MIDTRANS_SNAP_URL = mock.url;
   process.env.XENDIT_API_URL = mock.url;
   process.env.EXPO_PUSH_URL = mock.url + '/push/send';
+  process.env.TRIPAY_API_URL = mock.url + '/tripay';
+  process.env.IPAYMU_API_URL = mock.url + '/ipaymu';
 });
 test.after(async () => { srv.close(); await mock.close(); });
 
@@ -534,4 +536,152 @@ test('etalase: pencarian, kategori, produk habis tanpa tombol beli, kupon langsu
   await owner.post(`/admin/products/${ready}/toggle`);
   assert.strictEqual((await c.get('/product/' + ready)).status, 404);
   assert.ok(!(await c.get('/')).text.includes('Barang Siap XYZ'));
+});
+
+// ---------- Gateway tambahan: Tripay & iPaymu ----------
+const withPriority = async (order, fn) => {
+  const settings = require('../settings'), { health } = require('../http');
+  settings.set('PAYMENT_PRIORITY', order, 'uji');
+  try { await fn(); } finally { settings.set('PAYMENT_PRIORITY', '', 'uji'); for (const n of ['tripay', 'ipaymu', 'midtrans', 'xendit']) health.good('pay:' + n); mock.state.fail.tripay = mock.state.fail.ipaymu = false; }
+};
+const buyVia = async (c, token, productName) => {
+  const pid = store().db.prepare('SELECT id FROM products WHERE name = ?').get(productName).id;
+  await owner.post(`/admin/products/${pid}/stock`, { form: { items: 'gw1|a\ngw2|b\ngw3|c' } });
+  const o = await c.post('/api/v1/orders', { token, json: { product_id: pid } });
+  assert.strictEqual(o.status, 201, o.text);
+  return o.data;
+};
+
+test('Tripay: tagihan, webhook bertanda tangan, biaya pelanggan, tanda tangan palsu, nominal salah, polling status', async () => {
+  const c = client();
+  const settings = require('../settings');
+  for (const [k, v] of Object.entries({ TRIPAY_API_KEY: mock.tripay.apiKey, TRIPAY_PRIVATE_KEY: mock.tripay.privateKey, TRIPAY_MERCHANT_CODE: mock.tripay.merchant })) settings.set(k, v, 'uji');
+  await withPriority('tripay,midtrans,xendit', async () => {
+    // uji koneksi: kunci benar lulus, kunci salah gagal dengan pesan jelas
+    const integ = require('../integrations');
+    assert.strictEqual((await integ.test('tripay', 'uji')).ok, true);
+    settings.set('TRIPAY_API_KEY', 'salah', 'uji');
+    const bad = await integ.test('tripay', 'uji'); assert.strictEqual(bad.ok, false); assert.match(bad.detail, /401/);
+    settings.set('TRIPAY_API_KEY', mock.tripay.apiKey, 'uji');
+
+    const d = await buyVia(c, tokenA, 'Akun Uji');
+    assert.match(d.pay_url, /\/mock\/pay\/tripay\//);
+    const id = d.order.id, ref = `${id}-P1`;
+    const att = store().getAttempt(ref);
+    assert.strictEqual(att.provider, 'tripay'); assert.match(att.ext_ref, /^T\d+$/, 'reference Tripay tersimpan');
+
+    // tanda tangan palsu ditolak, pesanan tetap menunggu
+    assert.strictEqual((await mock.pay('tripay', ref, { badSignature: true })).status, 403);
+    assert.strictEqual(store().getOrder(id).status, 'pending');
+    // tanpa tanda tangan sama sekali
+    assert.strictEqual((await fetch(base + '/pay/tripay/notify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ merchant_ref: ref, status: 'PAID', total_amount: 20000 }) })).status, 403);
+    assert.strictEqual(store().getOrder(id).status, 'pending');
+
+    // pembayaran sah dengan biaya yang dibebankan ke pelanggan (total_amount − fee_customer = nominal pesanan)
+    const r = await mock.pay('tripay', ref, { feeCustomer: 750 });
+    assert.strictEqual(r.status, 200); assert.deepStrictEqual(await r.json(), { success: true }, 'Tripay mewajibkan balasan {"success":true}');
+    const done = await until(async () => { const x = await c.get('/api/v1/orders/' + id, { token: tokenA }); return x.data.status === 'paid' && x.data; });
+    assert.strictEqual(done.items.length, 1);
+    await mock.pay('tripay', ref, { feeCustomer: 750 }); // webhook diulang
+    assert.strictEqual(store().allocatedCount(id), 1, 'tidak mengalokasi ganda');
+
+    // nominal tidak cocok → ditolak
+    const d2 = await buyVia(c, tokenA, 'Akun Uji');
+    assert.strictEqual((await mock.pay('tripay', `${d2.order.id}-P1`, { amount: 1 })).status, 400);
+    assert.strictEqual(store().getOrder(d2.order.id).status, 'pending');
+
+    // webhook hilang → halaman pesanan menanyakan status ke Tripay
+    const d3 = await buyVia(c, tokenA, 'Akun Uji');
+    mock.state.tripay.get(`${d3.order.id}-P1`).status = 'PAID';
+    const polled = await c.get('/api/v1/orders/' + d3.order.id, { token: tokenA });
+    assert.strictEqual(polled.data.status, 'paid', 'polling status Tripay');
+  });
+});
+
+test('Tripay: gangguan → failover ke gateway berikutnya; pembayaran ganda → refund API tidak tersedia, jalur manual', async () => {
+  const c = client();
+  await withPriority('tripay,midtrans,xendit', async () => {
+    mock.state.fail.tripay = true;
+    const f = await buyVia(c, tokenA, 'Akun Uji');
+    assert.match(f.pay_url, /midtrans/, 'pindah ke Midtrans saat Tripay gangguan');
+    mock.state.fail.tripay = false; require('../http').health.good('pay:tripay');
+
+    // pembayaran ganda: tagihan pertama Midtrans (P2) dibayar dulu, lalu tagihan Tripay (P1) dibayar lagi
+    const e = await buyVia(c, tokenA, 'Akun Uji'); const eid = e.order.id;
+    await c.post(`/api/v1/orders/${eid}/pay`, { token: tokenA }); // P2 = midtrans
+    await mock.pay('midtrans', `${eid}-P2`); await until(async () => store().getOrder(eid).status === 'paid');
+    await mock.pay('tripay', `${eid}-P1`);   // bayar ganda lewat Tripay
+    const rf2 = await until(() => store().db.prepare("SELECT * FROM refunds WHERE order_id = ?").get(eid));
+    assert.strictEqual(rf2.status, 'failed'); assert.match(rf2.message, /tidak mendukung/i);
+    // admin bisa mencatat refund manual
+    const man = await owner.post(`/admin/orders/${eid}/refund`, { form: { reason: 'via dashboard Tripay', attempt: `${eid}-P1`, manual: '1' } });
+    assert.match(decodeURIComponent(man.loc), /m=/);
+    assert.strictEqual(store().db.prepare("SELECT status FROM refunds WHERE order_id = ? AND attempt_ref = ? ORDER BY id DESC").get(eid, `${eid}-P1`).status, 'succeeded');
+  });
+});
+
+test('iPaymu: tanda tangan request, tagihan, notifikasi diverifikasi lewat API, notifikasi palsu ditolak', async () => {
+  const c = client();
+  const settings = require('../settings');
+  settings.set('IPAYMU_VA', mock.ipaymu.va, 'uji'); settings.set('IPAYMU_API_KEY', mock.ipaymu.key, 'uji');
+  await withPriority('ipaymu,midtrans,xendit', async () => {
+    const integ = require('../integrations');
+    assert.strictEqual((await integ.test('ipaymu', 'uji')).ok, true, 'uji koneksi (tanda tangan diterima server tiruan)');
+    settings.set('IPAYMU_API_KEY', 'kunci-salah', 'uji');
+    const bad = await integ.test('ipaymu', 'uji'); assert.strictEqual(bad.ok, false); assert.match(bad.detail, /401/);
+    settings.set('IPAYMU_API_KEY', mock.ipaymu.key, 'uji');
+
+    const d = await buyVia(c, tokenA, 'Akun Uji'); const id = d.order.id, ref = `${id}-P1`;
+    assert.match(d.pay_url, /\/mock\/pay\/ipaymu\//); assert.strictEqual(store().getAttempt(ref).provider, 'ipaymu');
+
+    // notifikasi palsu: transaksi tak dikenal → verifikasi API gagal → 502 (gateway akan kirim ulang), pesanan tetap menunggu
+    assert.strictEqual((await mock.forge({ trx_id: '999999', reference_id: ref, status: 'berhasil', status_code: '1' })).status, 502);
+    assert.strictEqual(store().getOrder(id).status, 'pending');
+    // transaksi nyata milik pesanan lain tetapi reference_id dipalsukan → ditolak
+    const other = await buyVia(c, tokenA, 'Akun Uji'); const otherTrx = mock.state.ipaymu.get(`${other.order.id}-P1`).trx;
+    assert.strictEqual((await mock.forge({ trx_id: String(otherTrx), reference_id: ref, status: 'berhasil', status_code: '1' })).status, 403);
+    assert.strictEqual(store().getOrder(id).status, 'pending');
+    // notifikasi "berhasil" untuk transaksi yang belum dibayar di gateway → tetap menunggu (isi notifikasi tidak dipercaya)
+    assert.strictEqual((await mock.forge({ trx_id: String(mock.state.ipaymu.get(ref).trx), reference_id: ref, status: 'berhasil', status_code: '1' })).status, 200);
+    assert.strictEqual(store().getOrder(id).status, 'pending', 'status ditentukan API gateway, bukan isi notifikasi');
+
+    // pembayaran sah
+    assert.strictEqual((await mock.pay('ipaymu', ref)).status, 200);
+    const done = await until(async () => { const x = await c.get('/api/v1/orders/' + id, { token: tokenA }); return x.data.status === 'paid' && x.data; });
+    assert.strictEqual(done.items.length, 1);
+
+    // nominal tidak cocok dengan pesanan
+    const m = await buyVia(c, tokenA, 'Akun Uji'); const mref = `${m.order.id}-P1`;
+    mock.state.ipaymu.get(mref).amount = 1;
+    assert.strictEqual((await mock.pay('ipaymu', mref)).status, 400);
+    assert.strictEqual(store().getOrder(m.order.id).status, 'pending');
+  });
+});
+
+test('iPaymu: gangguan → failover; Tripay & iPaymu di Pengaturan/Integrasi (kunci bermasker, gerbang produksi)', async () => {
+  const c = client();
+  await withPriority('ipaymu,midtrans', async () => {
+    mock.state.fail.ipaymu = true;
+    assert.match((await buyVia(c, tokenA, 'Akun Uji')).pay_url, /midtrans/, 'failover ke Midtrans');
+  });
+  // pengaturan lewat UI: kunci tersimpan terenkripsi & bermasker
+  for (const g of ['tripay', 'ipaymu']) assert.strictEqual((await owner.get('/admin/settings/' + g)).status, 200);
+  await owner.post('/admin/settings/tripay', { form: { TRIPAY_API_KEY: 'RAHASIA-TRIPAY-9999', TRIPAY_PRIVATE_KEY: mock.tripay.privateKey, TRIPAY_MERCHANT_CODE: mock.tripay.merchant, TRIPAY_METHOD: 'BRIVA' } });
+  const page = (await owner.get('/admin/settings/tripay')).text;
+  assert.ok(!page.includes('RAHASIA-TRIPAY-9999') && page.includes('••••9999'));
+  assert.ok(!store().db.prepare("SELECT value FROM settings WHERE key='TRIPAY_API_KEY'").get().value.includes('RAHASIA'));
+  assert.strictEqual(process.env.TRIPAY_METHOD, 'BRIVA');
+  await owner.post('/admin/settings/tripay', { form: { TRIPAY_API_KEY: mock.tripay.apiKey, TRIPAY_METHOD: 'QRIS' } });
+  // integrasi: tampil dengan peringatan "belum diuji", mode produksi terkunci sebelum uji sandbox
+  const integ = (await owner.get('/admin/status')).text;
+  assert.ok(integ.includes('Tripay') && integ.includes('iPaymu') && /format API belum diuji/.test(integ));
+  store().db.prepare("DELETE FROM integration_checks WHERE integration IN ('tripay','ipaymu')").run();
+  for (const id of ['tripay', 'ipaymu']) {
+    const r = await owner.post(`/admin/integrations/${id}/mode`, { form: { mode: 'production' } });
+    assert.match(decodeURIComponent(r.loc), /e=.*uji sandbox/i, id);
+    assert.notStrictEqual(process.env[id === 'tripay' ? 'TRIPAY_SANDBOX' : 'IPAYMU_SANDBOX'], 'false');
+    const t = await owner.post(`/admin/integrations/${id}/test`); assert.match(decodeURIComponent(t.loc), /m=.*sukses/, id + ' ' + t.loc);
+    assert.match(decodeURIComponent((await owner.post(`/admin/integrations/${id}/mode`, { form: { mode: 'production' } })).loc), /m=.*PRODUKSI/, id);
+    await owner.post(`/admin/integrations/${id}/mode`, { form: { mode: 'sandbox' } });
+  }
 });

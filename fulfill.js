@@ -118,7 +118,7 @@ function onPayment(ref, result, amount) {
 async function syncPayments(orderId) {
   for (const a of store.attemptsOf(orderId).filter((x) => x.status === 'pending')) {
     try {
-      const s = await payments.providers[a.provider].status(a.ref);
+      const s = await payments.providers[a.provider].status(a.ref, a);
       onPayment(a.ref, s.result, s.amount);
     } catch (e) {
       console.error('[payments] sync gagal', a.ref, e.message);

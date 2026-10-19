@@ -16,7 +16,7 @@ Tanpa key gateway, app jalan dalam **mode demo** (ada tombol "Simulasikan pembay
 ## Cara kerja
 
 1. **Stok lokal**: `/admin` → Produk → pilih produk → Tambah stok (satu item per baris, mis. `email|password`).
-2. **Pembayaran multi-gateway**: tagihan dibuat di gateway pertama pada `PAYMENT_PRIORITY`. Bila gagal/gangguan, otomatis pindah ke gateway berikutnya (gateway yang baru gagal dilewati 2 menit). Pembeli juga bisa menekan "Coba metode pembayaran lain" di halaman pesanan.
+2. **Pembayaran multi-gateway**: tagihan dibuat di gateway pertama pada `PAYMENT_PRIORITY` (bawaan `midtrans,xendit,tripay,ipaymu`). Bila gagal/gangguan, otomatis pindah ke gateway berikutnya (gateway yang baru gagal dilewati 2 menit). Pembeli juga bisa menekan "Coba metode pembayaran lain" di halaman pesanan.
 3. **Pemasok cadangan**: di halaman produk, tambah *sumber cadangan* (pemasok + SKU + prioritas). Setelah pembayaran lunas, stok lokal dipakai dulu; kekurangannya dibeli dari pemasok prioritas 1, bila gagal otomatis ke prioritas 2, dst. Produk dengan sumber cadangan tampil "Tersedia" walau stok lokal 0.
 4. Status pesanan: `pending` → `paid` (terkirim) / `paid_sourcing` (menunggu pemasok, dicek tiap 30 detik) / `paid_nostock` (semua sumber gagal; admin tekan **Proses ulang** setelah isi stok).
 
@@ -26,8 +26,12 @@ Tanpa key gateway, app jalan dalam **mode demo** (ada tombol "Simulasikan pembay
 |---|---|---|
 | Midtrans | `MIDTRANS_SERVER_KEY`, `MIDTRANS_IS_PRODUCTION` | `https://<domain>/pay/midtrans/notify` |
 | Xendit | `XENDIT_SECRET_KEY`, `XENDIT_CALLBACK_TOKEN` | `https://<domain>/pay/xendit/notify` (isi token yang sama di Xendit → Webhook verification token) |
+| Tripay | `TRIPAY_API_KEY`, `TRIPAY_PRIVATE_KEY`, `TRIPAY_MERCHANT_CODE`, `TRIPAY_METHOD` (bawaan `QRIS`), `TRIPAY_SANDBOX` | Callback URL di Tripay: `https://<domain>/pay/tripay/notify` (ditandatangani HMAC-SHA256) |
+| iPaymu | `IPAYMU_VA`, `IPAYMU_API_KEY`, `IPAYMU_SANDBOX` | Dikirim otomatis (`notifyUrl`) ke `https://<domain>/pay/ipaymu/notify`; tiap notifikasi diverifikasi ulang lewat API iPaymu |
 
-Gateway baru cukup ditambah satu file di `providers/` (`create`, `parseWebhook`, `status`) dan didaftarkan di `payments.js`.
+Gateway baru cukup ditambah satu file di `providers/` (`create`, `parseWebhook`, `status`; opsional `refund`, `selfTest`, `mode`) dan didaftarkan di `payments.js`.
+
+**Tripay dan iPaymu** ditulis dari pengetahuan umum API mereka (dokumentasi resmi tidak bisa diakses saat pembuatan), jadi ditandai **belum diuji**: uji dengan akun sandbox masing-masing sebelum produksi (lihat [SANDBOX.md](SANDBOX.md)). Keduanya tidak punya API refund yang dipakai di sini, sehingga refund (mis. pembayaran ganda) dicatat lewat jalur **Tandai direfund manual** di admin. Tripay memakai satu metode bayar yang Anda pilih (`TRIPAY_METHOD`); di iPaymu pembeli memilih metode di halaman iPaymu. Pada iPaymu, status tidak bisa ditanya ulang dari sisi toko, jadi pembayaran bergantung pada webhook.
 
 Pembeli yang membayar dua tagihan sekaligus ditandai **⚠ dibayar ganda** di admin (perlu refund manual).
 
