@@ -8,18 +8,21 @@ const layout = (title, body, { head = '', admin = false } = {}) => `<!doctype ht
 <html lang="id"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · ${esc(STORE())}</title>
-<link rel="stylesheet" href="/style.css">${head}
+<link rel="stylesheet" href="/style.css">
+<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#5b4bff">
+<link rel="apple-touch-icon" href="/icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">${head}
 </head><body>
 <header class="top"><div class="wrap">
   <a class="brand" href="${admin ? '/admin' : '/'}">${esc(STORE())}${admin ? ' · Admin' : ''}</a>
   <nav>${
     admin
-      ? '<a href="/admin">Pesanan</a><a href="/admin/products">Produk</a><a href="/admin/coupons">Kupon</a><a href="/admin/reports">Laporan</a><a href="/admin/status">Integrasi</a><a href="/">Lihat toko</a><form method="post" action="/admin/logout"><button class="link">Keluar</button></form>'
-      : '<a href="/">Produk</a><a href="/track">Lacak pesanan</a>' + (WA() ? `<a href="https://wa.me/${WA()}" target="_blank" rel="noopener">WhatsApp</a>` : '')
+      ? '<a href="/admin">Pesanan</a><a href="/admin/products">Produk</a><a href="/admin/coupons">Kupon</a><a href="/admin/reports">Laporan</a><a href="/admin/status">Integrasi</a><a href="/admin/settings">Pengaturan</a><a href="/admin/admins">Admin</a><a href="/admin/me">Akun saya</a><a href="/">Lihat toko</a><form method="post" action="/admin/logout"><button class="link">Keluar</button></form>'
+      : '<a href="/">Produk</a><a href="/track">Lacak</a><a href="/account">Akun</a>' + (WA() ? `<a href="https://wa.me/${WA()}" target="_blank" rel="noopener">WhatsApp</a>` : '')
   }</nav>
 </div></header>
 <main class="wrap">${body}</main>
-<footer class="wrap foot">© ${new Date().getFullYear()} ${esc(STORE())}</footer>
+<footer class="wrap foot">© ${new Date().getFullYear()} ${esc(STORE())} · <a href="/legal/terms">Syarat &amp; Ketentuan</a> · <a href="/legal/privacy">Kebijakan Privasi</a> · <a href="/legal/refund">Kebijakan Refund</a></footer>
+<script>if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}))</script>
 </body></html>`;
 
 const stockLabel = (p) => (p.available ? 'Stok ' + p.available : p.orderable ? 'Tersedia' : 'Habis');
@@ -45,7 +48,7 @@ const home = (products, cats, active) =>
 <div class="grid">${products.map(productCard).join('') || '<p class="muted">Belum ada produk.</p>'}</div>`
   );
 
-const productPage = (p, error) =>
+const productPage = (p, error, user) =>
   layout(
     p.name,
     `<a href="/" class="muted">← Semua produk</a>
@@ -57,10 +60,11 @@ ${
   p.orderable
     ? `<form method="post" action="/checkout" class="form">
 <input type="hidden" name="product_id" value="${p.id}">
-<label>Nama<input name="name" required maxlength="60" autocomplete="name"></label>
-<label>WhatsApp / Email<input name="contact" required maxlength="80" placeholder="08xxxx atau email@..."></label>
+<label>Nama<input name="name" required maxlength="60" autocomplete="name" value="${esc(user?.name)}"></label>
+<label>WhatsApp / Email<input name="contact" required maxlength="80" placeholder="08xxxx atau email@..." value="${esc(user?.phone || user?.email)}"></label>
 <label>Jumlah<input name="qty" type="number" min="1" max="${p.maxQty}" value="1" required></label>
 <label>Kode kupon (opsional)<input name="coupon" maxlength="30" autocomplete="off" style="text-transform:uppercase"></label>
+<p class="muted" style="font-size:13px">Dengan membeli, Anda menyetujui <a href="/legal/terms">Syarat &amp; Ketentuan</a>, <a href="/legal/privacy">Kebijakan Privasi</a>, dan <a href="/legal/refund">Kebijakan Refund</a>.</p>
 <button class="btn">Beli sekarang</button></form>`
     : ''
 }</div>`
@@ -72,6 +76,7 @@ const STATUS = {
   paid_nostock: ['Lunas · menunggu stok', 'warn'],
   paid_sourcing: ['Lunas · produk sedang disiapkan', 'warn'],
   failed: ['Gagal / kedaluwarsa', 'out'],
+  refunded: ['Dana dikembalikan (refund)', 'warn'],
 };
 const badge = (s) => `<span class="${STATUS[s]?.[1] || ''}">${STATUS[s]?.[0] || s}</span>`;
 
@@ -120,7 +125,8 @@ const adminLogin = (error) =>
   layout(
     'Login Admin',
     `<div class="panel narrow"><h1>Login Admin</h1>${error ? `<p class="err">${esc(error)}</p>` : ''}
-<form method="post" action="/admin/login" class="form"><label>Password<input type="password" name="password" required autofocus></label>
+<form method="post" action="/admin/login" class="form"><label>Username<input name="username" value="admin" required autocapitalize="none" autocomplete="username"></label>
+<label>Password<input type="password" name="password" required autofocus autocomplete="current-password"></label>
 <button class="btn">Masuk</button></form></div>`,
     { admin: true }
   );
@@ -309,4 +315,4 @@ ${
 
 const notFound = () => layout('404', '<div class="panel"><h1>Halaman tidak ditemukan</h1><a href="/">Kembali ke toko</a></div>');
 
-module.exports = { track, adminReports, adminCoupons, home, productPage, orderPage, adminLogin, adminOrders, adminProducts, adminProduct, adminStatus, adminCatalog, notFound, esc };
+module.exports = { layout, rp, track, adminReports, adminCoupons, home, productPage, orderPage, adminLogin, adminOrders, adminProducts, adminProduct, adminStatus, adminCatalog, notFound, esc };

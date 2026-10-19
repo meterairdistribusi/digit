@@ -14,6 +14,11 @@ module.exports = {
   region: 'ID',
   verified: true,
   enabled: () => Boolean(user() && key()),
+  mode: () => (process.env.DIGIFLAZZ_TESTING === 'true' ? 'sandbox' : 'production'),
+  async selfTest() {
+    const b = await this.balance();
+    return b === undefined ? { ok: false, message: 'Login gagal / saldo tidak terbaca' } : { ok: true, message: 'Terhubung, saldo ' + b };
+  },
   idempotent: true, // ref_id yang sama mengembalikan status transaksi yang sama, aman untuk dicek ulang
 
   // Digiflazz: ref_id yang sama mengembalikan status transaksi yang sama, jadi cek ulang = buy ulang

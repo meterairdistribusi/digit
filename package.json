@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "sandbox:check": "node sandbox/check.js",
+    "sandbox:mock": "node sandbox/mock-gateways.js"
   },
   "engines": {
     "node": ">=22.13"

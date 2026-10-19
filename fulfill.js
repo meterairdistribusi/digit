@@ -3,6 +3,7 @@ const suppliers = require('./suppliers');
 const payments = require('./payments');
 const { health } = require('./http');
 const notify = require('./notify');
+const refunds = require('./refunds');
 
 const inflight = new Set();
 
@@ -105,7 +106,10 @@ function onPayment(ref, result, amount) {
   }
   const alreadyPaid = store.attemptsOf(o.id).some((x) => x.status === 'paid');
   store.setAttemptStatus(ref, alreadyPaid ? 'paid_duplicate' : 'paid'); // duplicate = pembeli bayar dua kali, perlu refund
-  if (alreadyPaid) notify.alert(`Pesanan ${o.id}: pembeli membayar dua kali (${ref}). Refund manual lewat dashboard gateway, lalu tandai di admin.`);
+  if (alreadyPaid) {
+    notify.alert(`Pesanan ${o.id}: pembeli membayar dua kali (${ref}).`);
+    refunds.autoRefundDuplicate(o.id, ref).catch((e) => console.error('[refund]', e));
+  }
   if (!alreadyPaid) settle(o.id).catch((e) => console.error('[settle]', e));
   return 'ok';
 }
@@ -136,4 +140,6 @@ function startWorker() {
   }, 30000).unref();
 }
 
-module.exports = { settle, sourceOrder, onPayment, syncPayments, retryLocal, startWorker };
+const isBusy = (orderId) => inflight.has(orderId);
+
+module.exports = { isBusy, settle, sourceOrder, onPayment, syncPayments, retryLocal, startWorker };

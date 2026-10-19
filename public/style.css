@@ -39,3 +39,9 @@ select{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius
 .scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 td form{margin:0}code{font-size:13px;word-break:break-all}
+.legal h2{margin:22px 0 6px;font-size:18px}.legal p,.legal li{line-height:1.6}.legal ul{padding-left:20px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start}.acts form{margin:0}
+.stack{display:flex;gap:6px;flex-wrap:wrap}.stack input{min-width:140px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+details summary{cursor:pointer;margin:6px 0}
+.foot a{color:inherit;text-decoration:underline}

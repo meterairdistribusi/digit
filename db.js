@@ -100,6 +100,70 @@ CREATE TABLE IF NOT EXISTS coupons (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+addColumn('orders', 'user_id', 'INTEGER');
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  pass_hash TEXT NOT NULL,
+  accepted_terms_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS admins (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  pass_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'staff',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  subject_id INTEGER NOT NULL,
+  device TEXT NOT NULL DEFAULT '',
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_subject ON sessions(kind, subject_id);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  secret INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS integration_checks (
+  id INTEGER PRIMARY KEY,
+  integration TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  detail TEXT,
+  by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_checks ON integration_checks(integration, mode, ok);
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY,
+  order_id TEXT NOT NULL REFERENCES orders(id),
+  attempt_ref TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_ref TEXT,
+  message TEXT,
+  requested_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
+-- satu refund aktif (pending/succeeded) per tagihan: mencegah refund ganda
+CREATE UNIQUE INDEX IF NOT EXISTS uq_refund_active ON refunds(attempt_ref) WHERE status IN ('pending','succeeded');
+`);
 // order status: pending | paid | paid_sourcing (menunggu pemasok) | paid_nostock | failed
 // attempt status: pending | paid | paid_duplicate | failed
 
@@ -154,7 +218,7 @@ function applyCoupon(code, subtotal) {
   return { code: c.code, discount: Math.min(off, subtotal - 1000) }; // total tidak boleh di bawah Rp1.000 (batas minimal gateway)
 }
 
-function createOrder({ productId, qty, name, contact, backorder = false, coupon = '' }) {
+function createOrder({ productId, qty, name, contact, backorder = false, coupon = '', userId = null }) {
   const id = 'ORD-' + crypto.randomBytes(5).toString('hex').toUpperCase();
   const key = crypto.randomBytes(16).toString('hex');
   return db.transaction(() => {
@@ -164,8 +228,8 @@ function createOrder({ productId, qty, name, contact, backorder = false, coupon 
     const subtotal = p.price * qty;
     const c = normCode(coupon) ? applyCoupon(coupon, subtotal) : { code: null, discount: 0 };
     db.prepare(
-      'INSERT INTO orders (id, product_id, qty, amount, customer_name, contact, access_key, discount, coupon_code) VALUES (?,?,?,?,?,?,?,?,?)'
-    ).run(id, productId, qty, subtotal - c.discount, name, contact, key, c.discount, c.code);
+      'INSERT INTO orders (id, product_id, qty, amount, customer_name, contact, access_key, discount, coupon_code, user_id) VALUES (?,?,?,?,?,?,?,?,?,?)'
+    ).run(id, productId, qty, subtotal - c.discount, name, contact, key, c.discount, c.code, userId);
     if (c.code) db.prepare('UPDATE coupons SET used = used + 1 WHERE code = ?').run(c.code);
     return getOrder(id);
   })();
@@ -244,7 +308,8 @@ const ORDER_SELECT = `
     COALESCE((SELECT provider FROM payment_attempts a WHERE a.order_id = o.id AND a.status IN ('paid','paid_duplicate') ORDER BY a.rowid LIMIT 1),
              (SELECT provider FROM payment_attempts a WHERE a.order_id = o.id ORDER BY a.rowid DESC LIMIT 1)) AS gateway,
     (SELECT COUNT(*) FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate') AS dup,
-    (SELECT COUNT(*) FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate' AND a.refund_status IS NULL) AS dup_open,
+    (SELECT COUNT(*) FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate' AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.attempt_ref = a.ref AND r.status IN ('pending','succeeded'))) AS dup_open,
+    (SELECT COUNT(*) FROM refunds r WHERE r.order_id = o.id AND r.status = 'failed' AND NOT EXISTS (SELECT 1 FROM refunds r2 WHERE r2.attempt_ref = r.attempt_ref AND r2.status IN ('pending','succeeded'))) AS refund_failed,
     (SELECT COUNT(*) FROM supplier_tx t WHERE t.order_id = o.id AND t.status = 'unknown') AS unknown_tx
   FROM orders o JOIN products p ON p.id = o.product_id`;
 
@@ -290,6 +355,9 @@ function findOrderByContact(id, contact) {
   return a && (a === b || (digits(a).length >= 8 && digits(a) === digits(b))) ? o : null;
 }
 
+const ordersOfUser = (userId) =>
+  db.prepare(`SELECT o.id, o.qty, o.amount, o.discount, o.coupon_code, o.status, o.created_at, o.access_key, p.name AS product_name FROM orders o JOIN products p ON p.id = o.product_id WHERE o.user_id = ? ORDER BY o.created_at DESC, o.rowid DESC LIMIT 100`).all(userId);
+
 const listCoupons = () => db.prepare('SELECT * FROM coupons ORDER BY created_at DESC').all();
 const saveCoupon = ({ code, type, value, minAmount, maxUses, expiresAt }) =>
   db.prepare(
@@ -298,16 +366,13 @@ const saveCoupon = ({ code, type, value, minAmount, maxUses, expiresAt }) =>
   ).run(normCode(code), type === 'fixed' ? 'fixed' : 'percent', value, minAmount, maxUses, expiresAt || null);
 const toggleCoupon = (code) => db.prepare('UPDATE coupons SET active = 1 - active WHERE code = ?').run(normCode(code));
 
-// Refund pembayaran ganda: dicatat manual oleh admin setelah uang dikembalikan lewat dashboard gateway
-const markRefunded = (orderId) =>
-  db.prepare("UPDATE payment_attempts SET refund_status = 'refunded' WHERE order_id = ? AND status = 'paid_duplicate' AND refund_status IS NULL").run(orderId).changes;
-
 // Penanda status yang sudah diberitahukan ke pembeli/admin, agar notifikasi tidak terkirim dua kali
 const claimNotice = (orderId, status) =>
   db.prepare('UPDATE orders SET notified = ? WHERE id = ? AND COALESCE(notified, \'\') != ?').run(status, orderId, status).changes > 0;
 
 module.exports = {
-  applyCoupon, getCoupon, listCoupons, saveCoupon, toggleCoupon, searchOrders, orderStats, salesReport, findOrderByContact, markRefunded, claimNotice,
+  ordersOfUser, addColumn,
+  applyCoupon, getCoupon, listCoupons, saveCoupon, toggleCoupon, searchOrders, orderStats, salesReport, findOrderByContact, claimNotice,
   db, listProducts, getProduct, categories, getOrder, orderItems, createOrder, fulfillLocal, markFailed,
   allocatedCount, setOrderStatus, attemptsOf, getAttempt, addAttempt, setAttemptStatus,
   listSources, addSource, deleteSource, txOf, addTx, setTx, sourcingOrders, nostockOrders, addDeliveredItem,

@@ -119,6 +119,10 @@ const fromConfig = (c) => {
     };
   }
   if (c.balance) {
+    adapter.selfTest = async () => {
+      const b = await adapter.balance();
+      return b === undefined || b === '' ? { ok: false, message: 'Saldo tidak terbaca (cek kunci)' } : { ok: true, message: 'Terhubung, saldo ' + b };
+    };
     adapter.balance = async () => {
       const vars = await varsFor({ sku: '', ref: 'balance', customer: '' });
       const { data } = await call(c.balance, vars, timeout);

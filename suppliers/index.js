@@ -7,7 +7,9 @@ const adapters = () => {
   return Object.fromEntries(all.map((a) => [a.name, a]));
 };
 
+// nama pemasok bawaan (bukan dari SUPPLIERS_JSON)
+const builtin = (name) => ['digiflazz', 'reloadly', ...presets.map((p) => p.name)].includes(name);
 const get = (name) => adapters()[name];
 const enabled = () => Object.values(adapters()).filter((a) => a.enabled());
 
-module.exports = { get, enabled, adapters };
+module.exports = { get, enabled, adapters, builtin };

@@ -11,7 +11,7 @@ npm install
 npm start          # http://localhost:3000
 ```
 
-Tanpa key gateway, app jalan dalam **mode demo** (ada tombol "Simulasikan pembayaran"). Admin: `/admin` (password default dev: `admin`).
+Tanpa key gateway, app jalan dalam **mode demo** (ada tombol "Simulasikan pembayaran"). Admin: `/admin` (username `admin`, password default dev: `admin`).
 
 ## Cara kerja
 
@@ -68,6 +68,16 @@ Tanpa ubah kode. Mendukung GET/POST, body JSON atau `form`, tanda tangan, token 
 ```
 
 Placeholder: `{{sku}} {{ref}} {{customer}} {{signature}} {{token}}`, dan `${NAMA_ENV}` (rahasia tetap di env). `sign` mendukung `algo` md5/sha1/sha256 dan `hmacKey`. Dengan `check`, transaksi pending dicek ulang otomatis dengan `ref` yang sama. **Tanpa `check`**, respons dianggap final dan bila request timeout transaksi ditandai **tidak pasti** (pemasok lain tidak dicoba, supaya tidak membeli dua kali); admin memeriksa manual.
+
+## Akun, aplikasi mobile, dan admin
+
+- **Akun pembeli**: daftar/masuk di web (`/register`, `/login`, `/account`) atau lewat **API** (`/api/v1`, token Bearer) untuk aplikasi Android/iPhone. Hapus akun, unduh data, dan ganti password tersedia di web dan API. Password di-hash (scrypt); sesi disimpan sebagai hash token.
+- **Aplikasi Android & iPhone**: toko ini adalah **PWA** (bisa dipasang ke layar utama: Android lewat Chrome "Instal aplikasi", iPhone lewat Safari "Tambah ke Layar Utama"). Aplikasi native di Play Store/App Store belum dibuat; API-nya sudah siap dipakai klien native. Catatan: Apple mewajibkan In-App Purchase untuk barang digital yang dijual di dalam aplikasi native, jadi untuk produk seperti ini PWA/web adalah jalur paling aman.
+- **Akun admin**: banyak admin dengan peran **Pemilik** (semua akses: Pengaturan, Integrasi, Admin, Refund) dan **Staf** (pesanan, produk, stok, kupon, laporan). Admin pertama (`admin`) dibuat dari `ADMIN_PASSWORD`; kelola di menu Admin.
+- **Pengaturan** (`/admin/settings`): kunci API gateway dan pemasok, notifikasi, data penjual. Disimpan terenkripsi AES-256-GCM (kunci dari `SETTINGS_KEY`/`SESSION_SECRET`), hanya 4 karakter terakhir yang ditampilkan, dan menimpa env.
+- **Refund otomatis**: pembayaran ganda direfund otomatis lewat API gateway; pesanan lunas tanpa stok direfund dari halaman detail pesanan (Pemilik). Satu refund aktif per tagihan, produk yang sudah terkirim tidak bisa direfund otomatis, dan bila API gateway menolak ada jalur "Tandai direfund manual".
+- **Dokumen hukum**: Kebijakan Privasi, Syarat & Ketentuan, Kebijakan Refund di `/legal/*` (dan API), dengan persetujuan wajib saat daftar. **Itu draf umum, wajib ditinjau konsultan hukum**; isi data penjual di Pengaturan → Data penjual.
+- **Sandbox → produksi**: lihat [SANDBOX.md](SANDBOX.md). Mode produksi terkunci sampai uji sandbox lulus.
 
 ## Fitur toko
 

@@ -64,6 +64,11 @@ async function announce(orderId) {
   }
 }
 
+async function refunded(o, attempt) {
+  const rp = 'Rp' + Number(o.amount).toLocaleString('id-ID');
+  await toBuyer(o, `Refund pesanan ${o.id}`, `Halo ${o.customer_name}, refund ${rp} untuk pesanan ${o.id} sudah diproses ke metode pembayaran Anda (${attempt.provider}). Dana biasanya masuk 1-14 hari kerja tergantung bank/e-wallet.`);
+}
+
 const alert = (text) => toAdmin(text);
 
-module.exports = { announce, alert, channels };
+module.exports = { announce, alert, refunded, channels };

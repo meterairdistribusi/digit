@@ -6,7 +6,8 @@ const { fetchJson } = require('../http');
 // Penerima email: bila kontak pembeli bukan email, dipakai RELOADLY_FALLBACK_EMAIL.
 // Catatan: ditulis dari dokumentasi publik, belum diuji dengan akun nyata. Uji di sandbox dulu.
 
-const sandbox = () => process.env.RELOADLY_SANDBOX === 'true';
+// Aman secara bawaan: sandbox kecuali RELOADLY_SANDBOX=false dinyatakan eksplisit
+const sandbox = () => process.env.RELOADLY_SANDBOX !== 'false';
 const host = () => (sandbox() ? 'https://giftcards-sandbox.reloadly.com' : 'https://giftcards.reloadly.com');
 const ACCEPT = 'application/com.reloadly.giftcards-v1+json';
 const id = () => process.env.RELOADLY_CLIENT_ID || '';
@@ -14,7 +15,7 @@ const secret = () => process.env.RELOADLY_CLIENT_SECRET || '';
 
 let cache = null;
 async function token() {
-  if (cache && cache.exp > Date.now()) return cache.value;
+  if (cache && cache.exp > Date.now() && cache.host === host()) return cache.value;
   const { data } = await fetchJson(
     'https://auth.reloadly.com/oauth/token',
     {
@@ -25,7 +26,7 @@ async function token() {
     15000
   );
   if (!data.access_token) throw new Error('Reloadly: gagal login');
-  cache = { value: data.access_token, exp: Date.now() + ((data.expires_in || 3600) - 120) * 1000 };
+  cache = { host: host(), value: data.access_token, exp: Date.now() + ((data.expires_in || 3600) - 120) * 1000 };
   return cache.value;
 }
 const api = async (path, opts = {}) =>
@@ -43,6 +44,11 @@ module.exports = {
   region: 'INT',
   verified: false,
   enabled: () => Boolean(id() && secret()),
+  mode: () => (sandbox() ? 'sandbox' : 'production'),
+  async selfTest() {
+    const b = await this.balance();
+    return b === undefined ? { ok: false, message: 'Login gagal / saldo tidak terbaca' } : { ok: true, message: 'Terhubung, saldo ' + b };
+  },
   idempotent: true, // pending dicek ulang lewat transactionId yang disimpan di pesan transaksi ("tid:123")
 
   async buy({ sku, ref, customer }) {
