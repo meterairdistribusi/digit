@@ -164,6 +164,15 @@ CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id);
 -- satu refund aktif (pending/succeeded) per tagihan: mencegah refund ganda
 CREATE UNIQUE INDEX IF NOT EXISTS uq_refund_active ON refunds(attempt_ref) WHERE status IN ('pending','succeeded');
 `);
+db.exec(`
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  platform TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_tokens(user_id);
+`);
 // order status: pending | paid | paid_sourcing (menunggu pemasok) | paid_nostock | failed
 // attempt status: pending | paid | paid_duplicate | failed
 

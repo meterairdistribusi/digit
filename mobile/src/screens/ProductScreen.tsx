@@ -5,14 +5,18 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import { rupiah } from '../api';
 import { useAuth } from '../auth';
+import { usePush } from '../push';
 import { Badge, Button, Card, ErrorText, Field, H1, Loading, Muted, Screen, useLoad } from '../components/ui';
 import type { Nav, RootStackParamList } from '../navigation';
-import { colors, space } from '../theme';
+import { createStyles, space, useTheme } from '../theme';
 
 export default function ProductScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const { id } = useRoute<RouteProp<RootStackParamList, 'Product'>>().params;
   const nav = useNavigation<Nav>();
   const { api, user } = useAuth();
+  const push = usePush();
   const { data: p, error, loading } = useLoad(() => api.product(id), [api, id]);
   const [qty, setQty] = useState(1);
   const [code, setCode] = useState('');
@@ -49,6 +53,7 @@ export default function ProductScreen() {
     try {
       const r = await api.createOrder({ productId: p.id, qty, coupon: applied?.code });
       nav.replace('Order', { id: r.order.id });
+      void push.offerOnce();
       if (r.pay_url) await WebBrowser.openBrowserAsync(r.pay_url); // pembayaran di halaman aman milik gateway
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Gagal membuat pesanan');
@@ -101,15 +106,15 @@ export default function ProductScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   desc: { fontSize: 15, lineHeight: 22, color: colors.fg },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: space.md },
   label: { color: colors.muted, fontSize: 15 },
   value: { fontSize: 16, fontWeight: '700', color: colors.fg },
   total: { fontSize: 18, fontWeight: '800', color: colors.fg },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  stepBtn: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f4f5fa' },
+  stepBtn: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.inputBg },
   stepText: { fontSize: 22, color: colors.fg, fontWeight: '600' },
   qty: { fontSize: 18, fontWeight: '700', minWidth: 24, textAlign: 'center', color: colors.fg },
-  link: { color: colors.brand, textDecorationLine: 'underline' },
-});
+  link: { color: colors.link, textDecorationLine: 'underline' },
+}));

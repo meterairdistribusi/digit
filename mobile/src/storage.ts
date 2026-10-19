@@ -26,3 +26,23 @@ export const tokenStore = {
     }
   },
 };
+
+// Preferensi kecil non-rahasia (tema, notifikasi). Pakai penyimpanan yang sama agar tidak menambah dependensi.
+const prefKey = (k: string) => 'pref-' + k;
+export const prefStore = {
+  async get(k: string): Promise<string | null> {
+    try {
+      return web ? globalThis.localStorage?.getItem(prefKey(k)) ?? null : await SecureStore.getItemAsync(prefKey(k));
+    } catch {
+      return null;
+    }
+  },
+  async set(k: string, v: string): Promise<void> {
+    try {
+      if (web) globalThis.localStorage?.setItem(prefKey(k), v);
+      else await SecureStore.setItemAsync(prefKey(k), v);
+    } catch {
+      /* abaikan */
+    }
+  },
+};

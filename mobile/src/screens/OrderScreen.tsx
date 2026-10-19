@@ -8,9 +8,11 @@ import { STATUS_LABEL, STATUS_TONE, isOpen, rupiah } from '../api';
 import { useAuth } from '../auth';
 import { Badge, Button, Card, ErrorText, H1, H2, Loading, Muted, Screen, useLoad } from '../components/ui';
 import type { RootStackParamList } from '../navigation';
-import { colors, space } from '../theme';
+import { createStyles, space, useTheme } from '../theme';
 
 export default function OrderScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const { id } = useRoute<RouteProp<RootStackParamList, 'Order'>>().params;
   const { api } = useAuth();
   const { data: o, error, loading, reload } = useLoad(() => api.order(id), [api, id]);
@@ -94,8 +96,8 @@ export default function OrderScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   prod: { fontSize: 16, color: colors.fg, fontWeight: '600' },
   amount: { fontSize: 24, fontWeight: '800', color: colors.fg, marginTop: 4 },
-  secret: { fontFamily: 'Courier', fontSize: 15, color: colors.fg, backgroundColor: '#f4f5fa', padding: 12, borderRadius: 10 },
-});
+  secret: { fontFamily: 'Courier', fontSize: 15, color: colors.fg, backgroundColor: colors.inputBg, padding: 12, borderRadius: 10 },
+}));

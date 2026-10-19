@@ -2,7 +2,7 @@
 
 React Native + Expo (TypeScript), satu kode untuk Android dan iOS. Aplikasi ini hanya klien: semua data, pembayaran, refund, dan akun ada di backend repo ini lewat API `/api/v1`.
 
-**Fitur:** katalog + cari + kategori · detail produk, jumlah, kupon · daftar/masuk (token di Keychain/Keystore) · beli & bayar di halaman gateway (browser dalam aplikasi) · status pesanan otomatis diperbarui · produk terkirim + tombol salin · riwayat pesanan · ganti password · unduh data · hapus akun di dalam aplikasi · Syarat, Privasi, Refund · persetujuan saat daftar.
+**Fitur:** mode gelap otomatis (ikut sistem, bisa dipaksa Terang/Gelap) · notifikasi push saat pembayaran diterima, produk siap, dan refund · katalog + cari + kategori · detail produk, jumlah, kupon · daftar/masuk (token di Keychain/Keystore) · beli & bayar di halaman gateway (browser dalam aplikasi) · status pesanan otomatis diperbarui · produk terkirim + tombol salin · riwayat pesanan · ganti password · unduh data · hapus akun di dalam aplikasi · Syarat, Privasi, Refund · persetujuan saat daftar.
 
 ## Menjalankan (pengembangan)
 
@@ -15,6 +15,17 @@ cd mobile && npm install
 EXPO_PUBLIC_API_URL=http://<IP-komputer-anda>:3000 npx expo start
 ```
 Buka dengan **Expo Go** di HP (satu jaringan Wi-Fi), atau emulator (`a` Android, `i` iOS, iOS hanya di Mac). Emulator Android memakai `http://10.0.2.2:3000` untuk mengakses komputer. Versi **produksi wajib `https`**.
+
+## Notifikasi push
+
+Alur: aplikasi meminta izin (setelah pesanan pertama, atau lewat saklar di Akun) → mendapat *Expo push token* → dikirim ke backend (`PUT /api/v1/me/push-token`) → saat status pesanan berubah backend mengirim lewat layanan **Expo Push** ke Android (FCM) dan iPhone (APNs). Mengetuk notifikasi membuka halaman pesanan. Isi produk (akun/kode) **tidak pernah** dikirim lewat push, hanya ringkasan + ID pesanan. Token yang sudah tidak berlaku otomatis dibersihkan, dan dicabut saat keluar akun/hapus akun.
+
+Yang perlu Anda siapkan (tidak bisa dilakukan dari sini):
+1. `eas init` supaya `extra.eas.projectId` terisi (wajib untuk mendapat push token).
+2. **iPhone**: build lewat EAS; EAS membuat kunci APNs untuk Anda (butuh Apple Developer Program).
+3. **Android**: buat project Firebase, unduh `google-services.json`, lalu simpan sebagai *file env var* EAS (`eas env:create`) dan isi `android.googleServicesFile` di `app.json` dengan path-nya; unggah kunci FCM V1 ke Expo (`eas credentials`). Tanpa ini push Android tidak jalan.
+4. Push **tidak berfungsi di Expo Go** (Android) maupun simulator; pakai development build/preview build di HP sungguhan.
+5. Opsional: `EXPO_ACCESS_TOKEN` di admin → Pengaturan → Notifikasi bila Anda mengaktifkan "Enhanced Push Security" di akun Expo.
 
 ## Pemeriksaan otomatis
 
@@ -47,7 +58,10 @@ Build tidak bisa dibuat dari lingkungan pengembangan ini (butuh akun Expo; iOS b
 - ✔ `tsc` bersih; bundel Hermes Android & iOS terkompilasi.
 - ✔ Klien API diuji terhadap backend asli (`test/mobile-api.test.js`).
 - ✔ UI dijalankan lewat build web dari kode yang sama (react-native-web) + backend asli: cari, kupon, daftar, beli, produk terkirim otomatis, salin, sesi bertahan setelah muat ulang, dokumen hukum.
+- ✔ Mode gelap diuji (ikut sistem gelap, paksa Terang/Gelap, pilihan tersimpan setelah muat ulang).
+- ✔ Sisi server push diuji end-to-end dengan layanan Expo tiruan (token valid/tidak valid, terkirim saat pesanan siap & refund, tanpa isi produk, token mati dibersihkan, pindah akun, cabut token, hapus akun).
+- ✘ **Push ke perangkat sungguhan belum diuji** (butuh build di HP, project EAS, FCM/APNs).
 - ✘ **Belum dijalankan di emulator/perangkat Android atau iPhone sungguhan** (tidak ada Android SDK/Xcode di lingkungan pembuatan). Uji di perangkat sebelum dirilis: keyboard, safe area/notch, Keychain/Keystore, halaman bayar gateway, tombol kembali Android.
 
 ## Belum ada
-Notifikasi push (pembeli dikabari lewat WhatsApp/email, dan status diperbarui otomatis saat aplikasi terbuka), login sosial, mode gelap, dan unggahan ke toko aplikasi.
+Login sosial dan unggahan ke toko aplikasi. Notifikasi push sudah ada tetapi butuh setup EAS/FCM/APNs di atas.

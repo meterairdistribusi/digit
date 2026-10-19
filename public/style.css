@@ -45,3 +45,5 @@ td form{margin:0}code{font-size:13px;word-break:break-all}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
 details summary{cursor:pointer;margin:6px 0}
 .foot a{color:inherit;text-decoration:underline}
+.top .wrap{flex-wrap:wrap;row-gap:6px}.top nav{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center}.top nav a,.top .brand{white-space:nowrap}
+.top .wrap{height:auto;min-height:56px;padding-block:8px}

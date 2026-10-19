@@ -1,5 +1,6 @@
 const store = require('./db');
 const { fetchJson } = require('./http');
+const push = require('./push');
 
 // Notifikasi ke pembeli (WhatsApp via Fonnte, email via Resend) dan ke admin (Telegram).
 // Semuanya opsional lewat env; tanpa env, fungsi ini tidak melakukan apa-apa. Kegagalan kirim hanya dicatat di log
@@ -58,8 +59,10 @@ async function announce(orderId) {
   const head = `Halo ${o.customer_name}, `;
   if (o.status === 'paid') {
     await toBuyer(o, `Pesanan ${o.id} siap`, `${head}pesanan ${o.id} (${o.product_name} ×${o.qty}) sudah siap. Buka produk Anda di:\n${link(o)}`);
+    await push.toUser(o.user_id, { title: 'Pesanan siap 🎉', body: `${o.product_name} ×${o.qty} sudah bisa dibuka.`, data: { orderId: o.id } });
   } else if (o.status === 'paid_nostock') {
     await toBuyer(o, `Pesanan ${o.id} diproses`, `${head}pembayaran ${o.id} diterima. Produk sedang disiapkan, kami kabari bila sudah siap. Pantau di:\n${link(o)}`);
+    await push.toUser(o.user_id, { title: 'Pembayaran diterima', body: `${o.product_name}: produk sedang disiapkan, kami kabari saat siap.`, data: { orderId: o.id } });
     await toAdmin(`Pesanan ${o.id} (${o.product_name} ×${o.qty}) lunas tapi stok/pemasok tidak mencukupi. Isi stok lalu tekan Proses ulang.`);
   }
 }
@@ -67,6 +70,7 @@ async function announce(orderId) {
 async function refunded(o, attempt) {
   const rp = 'Rp' + Number(o.amount).toLocaleString('id-ID');
   await toBuyer(o, `Refund pesanan ${o.id}`, `Halo ${o.customer_name}, refund ${rp} untuk pesanan ${o.id} sudah diproses ke metode pembayaran Anda (${attempt.provider}). Dana biasanya masuk 1-14 hari kerja tergantung bank/e-wallet.`);
+  await push.toUser(o.user_id, { title: 'Refund diproses', body: `Dana ${rp} untuk pesanan ${o.id} dikembalikan ke metode pembayaran Anda.`, data: { orderId: o.id } });
 }
 
 const alert = (text) => toAdmin(text);

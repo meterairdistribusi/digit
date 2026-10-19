@@ -46,6 +46,7 @@ const GROUPS = [
     fields: [
       S('FONNTE_TOKEN', 'Fonnte token (WhatsApp)'), S('RESEND_API_KEY', 'Resend API key (email)'), F('MAIL_FROM', 'Alamat pengirim email'),
       S('TELEGRAM_BOT_TOKEN', 'Telegram bot token (alert admin)'), F('TELEGRAM_CHAT_ID', 'Telegram chat ID'),
+      S('EXPO_ACCESS_TOKEN', 'Expo access token (push, opsional; wajib bila "Enhanced Push Security" aktif)'),
     ],
   },
   { id: 'refund', label: 'Refund', fields: [F('AUTO_REFUND_DUPLICATE', 'Refund otomatis pembayaran ganda', { bool: true, def: 'true' })] },

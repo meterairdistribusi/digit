@@ -5,6 +5,7 @@ const payments = require('./payments');
 const fulfill = require('./fulfill');
 const legal = require('./legal');
 const settings = require('./settings');
+const push = require('./push');
 const { placeOrder, decorate, CheckoutError } = require('./checkout');
 
 // REST API untuk aplikasi pembeli Android/iPhone (dan PWA). Auth: header "Authorization: Bearer <token>".
@@ -100,6 +101,16 @@ r.post('/me/password', auth, limit('pw', 10, 15 * 60e3), (req, res) => {
     if (e instanceof accounts.UserError) return res.status(400).json({ error: e.message });
     throw e;
   }
+});
+
+// Notifikasi push: daftarkan/cabut token perangkat milik akun yang sedang masuk
+r.put('/me/push-token', auth, limit('push', 30, 3600e3), (req, res) => {
+  if (!push.register(req.user.id, req.body?.token, req.body?.platform)) return res.status(400).json({ error: 'Token push tidak valid' });
+  res.json({ ok: true });
+});
+r.delete('/me/push-token', auth, (req, res) => {
+  push.unregister(req.user.id, req.body?.token);
+  res.json({ ok: true });
 });
 
 r.get('/me/export', auth, (req, res) => res.json(accounts.exportUser(req.user.id)));

@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "scheme": "tokodigital",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#f6f7fb",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -36,6 +36,16 @@
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "plugins": ["expo-secure-store", "expo-web-browser"]
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "color": "#5b4bff",
+          "defaultChannel": "orders"
+        }
+      ]
+    ]
   }
 }

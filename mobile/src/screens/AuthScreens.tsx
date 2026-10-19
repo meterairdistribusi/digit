@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { Button, ErrorText, Field, H1, Muted, Screen } from '../components/ui';
 import type { Nav } from '../navigation';
-import { colors } from '../theme';
+import { createStyles, useTheme } from '../theme';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Terjadi kesalahan');
 
@@ -33,6 +33,8 @@ export function LoginScreen() {
 }
 
 export function RegisterScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const nav = useNavigation<Nav>();
   const { register } = useAuth();
   const [f, setF] = useState({ name: '', email: '', phone: '', password: '' });
@@ -68,8 +70,8 @@ export function RegisterScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   consent: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   consentText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.fg },
-  link: { color: colors.brand, textDecorationLine: 'underline' },
-});
+  link: { color: colors.link, textDecorationLine: 'underline' },
+}));

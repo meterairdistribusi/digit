@@ -5,9 +5,11 @@ import { STATUS_LABEL, STATUS_TONE, rupiah } from '../api';
 import { useAuth } from '../auth';
 import { Badge, Button, Empty, ErrorText, Loading, useLoad } from '../components/ui';
 import type { Nav } from '../navigation';
-import { colors, radius, space } from '../theme';
+import { createStyles, radius, space, useTheme } from '../theme';
 
 export default function OrdersScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const { api, user, ready } = useAuth();
   const nav = useNavigation<Nav>();
   const { data, error, loading, reload } = useLoad(() => (user ? api.orders() : Promise.resolve([])), [api, user]);
@@ -50,11 +52,11 @@ export default function OrdersScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   center: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', padding: space.lg },
   card: { backgroundColor: colors.card, borderRadius: radius, borderWidth: 1, borderColor: colors.line, padding: space.lg, gap: 4 },
   name: { fontSize: 16, fontWeight: '700', color: colors.fg },
   meta: { fontSize: 12, color: colors.muted },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   price: { fontSize: 17, fontWeight: '800', color: colors.fg },
-});
+}));

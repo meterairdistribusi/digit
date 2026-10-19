@@ -8,7 +8,8 @@
     "dev": "node --watch server.js",
     "test": "node --test \"test/*.test.js\"",
     "sandbox:check": "node sandbox/check.js",
-    "sandbox:mock": "node sandbox/mock-gateways.js"
+    "sandbox:mock": "node sandbox/mock-gateways.js",
+    "demo": "node sandbox/demo.js"
   },
   "engines": {
     "node": ">=22.13"

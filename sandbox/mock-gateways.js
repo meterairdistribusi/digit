@@ -12,6 +12,7 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
     xendit: new Map(), // external_id -> {id, amount, status}
     refunds: [],
     supplierCalls: [],
+    pushes: [],
     fail: {},
     refundFail: false,
     stock: ['MOCK-CODE-1', 'MOCK-CODE-2', 'MOCK-CODE-3'],
@@ -70,6 +71,13 @@ async function start({ appUrl, midtransKey = 'SB-mock-key', xenditToken = 'cb-to
       const dup = state.refunds.find((r) => r.key === req.headers['idempotency-key']);
       if (!dup) state.refunds.push({ provider: 'xendit', ref: inv.id, amount: b.amount, key: req.headers['idempotency-key'], reason: b.reason });
       return json(res, 200, { id: 'rfd-' + state.refunds.length, status: 'SUCCEEDED', amount: b.amount });
+    }
+
+    // ----- Expo Push -----
+    if (p === '/push/send' && req.method === 'POST') {
+      const list = Array.isArray(b) ? b : [b];
+      state.pushes.push(...list);
+      return json(res, 200, { data: list.map((m) => (String(m.to).includes('Dead') ? { status: 'error', message: 'not registered', details: { error: 'DeviceNotRegistered' } } : { status: 'ok', id: 'tk' })) });
     }
 
     // ----- Agregator generik -----

@@ -5,9 +5,11 @@ import { Product, rupiah } from '../api';
 import { useAuth } from '../auth';
 import { Badge, Empty, ErrorText, Field, H1, Loading, Muted, useLoad } from '../components/ui';
 import type { Nav } from '../navigation';
-import { colors, radius, space } from '../theme';
+import { createStyles, radius, space, useTheme } from '../theme';
 
 export default function HomeScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const { api } = useAuth();
   const nav = useNavigation<Nav>();
   const [cat, setCat] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export default function HomeScreen() {
 }
 
 function ProductCard({ p, onPress }: { p: Product; onPress: () => void }) {
+  const s = useS();
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${p.name}, ${rupiah(p.price)}`} style={({ pressed }) => [s.card, pressed && { opacity: 0.85 }]}>
       <Badge text={p.category} tone="brand" />
@@ -75,7 +78,7 @@ function ProductCard({ p, onPress }: { p: Product; onPress: () => void }) {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card },
   chipOn: { backgroundColor: colors.brand, borderColor: colors.brand },
   chipText: { color: colors.fg, fontWeight: '600' },
@@ -84,4 +87,4 @@ const s = StyleSheet.create({
   desc: { color: colors.muted, fontSize: 14, lineHeight: 20 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   price: { fontSize: 18, fontWeight: '800', color: colors.fg },
-});
+}));

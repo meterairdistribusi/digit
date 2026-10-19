@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { createStyles, useTheme } from '../theme';
 
 // Penampil Markdown ringan untuk dokumen hukum: "## judul", "- poin", **tebal**, paragraf. Tidak mengeksekusi HTML apa pun.
 function Inline({ text, style }: { text: string; style?: object }) {
@@ -13,6 +13,8 @@ function Inline({ text, style }: { text: string; style?: object }) {
 }
 
 export function Markdown({ source }: { source: string }) {
+  const s = useS();
+  const { colors } = useTheme();
   const out: React.ReactNode[] = [];
   let bullets: string[] = [];
   let para: string[] = [];
@@ -43,7 +45,7 @@ export function Markdown({ source }: { source: string }) {
   return <View style={{ gap: 10 }}>{out}</View>;
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
   h: { fontSize: 17, fontWeight: '700', color: colors.fg, marginTop: 10 },
   p: { fontSize: 15, lineHeight: 22, color: colors.fg },
-});
+}));

@@ -82,6 +82,7 @@ function deleteUser(id) {
   db.transaction(() => {
     db.prepare('UPDATE orders SET user_id = NULL WHERE user_id = ?').run(id);
     revokeAll('user', id);
+    db.prepare('DELETE FROM push_tokens WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
   })();
 }

@@ -71,8 +71,10 @@ Placeholder: `{{sku}} {{ref}} {{customer}} {{signature}} {{token}}`, dan `${NAMA
 
 ## Akun, aplikasi mobile, dan admin
 
+> **Lihat admin tanpa menyiapkan apa pun:** `npm run demo` lalu buka http://localhost:3000/admin (admin / admin). Berisi data contoh lengkap (pesanan, refund, kupon, laporan, integrasi). Tangkapan layar: [docs/admin/](docs/admin/README.md).
+
 - **Akun pembeli**: daftar/masuk di web (`/register`, `/login`, `/account`) atau lewat **API** (`/api/v1`, token Bearer) untuk aplikasi Android/iPhone. Hapus akun, unduh data, dan ganti password tersedia di web dan API. Password di-hash (scrypt); sesi disimpan sebagai hash token.
-- **Aplikasi native Android & iPhone**: folder [`mobile/`](mobile/README.md) (React Native + Expo) memakai API `/api/v1`: katalog, kupon, daftar/masuk, beli & bayar, pesanan, produk terkirim, hapus akun, dokumen hukum. Cara menjalankan, build, dan catatan kebijakan toko aplikasi ada di `mobile/README.md`.
+- **Aplikasi native Android & iPhone**: folder [`mobile/`](mobile/README.md) (React Native + Expo) memakai API `/api/v1`, dengan **mode gelap** dan **notifikasi push**: katalog, kupon, daftar/masuk, beli & bayar, pesanan, produk terkirim, hapus akun, dokumen hukum. Cara menjalankan, build, dan catatan kebijakan toko aplikasi ada di `mobile/README.md`.
 - **PWA**: toko web ini juga (bisa dipasang ke layar utama: Android lewat Chrome "Instal aplikasi", iPhone lewat Safari "Tambah ke Layar Utama"). Aplikasi native di Play Store/App Store belum dibuat; API-nya sudah siap dipakai klien native. Catatan: Apple mewajibkan In-App Purchase untuk barang digital yang dijual di dalam aplikasi native, jadi untuk produk seperti ini PWA/web adalah jalur paling aman.
 - **Akun admin**: banyak admin dengan peran **Pemilik** (semua akses: Pengaturan, Integrasi, Admin, Refund) dan **Staf** (pesanan, produk, stok, kupon, laporan). Admin pertama (`admin`) dibuat dari `ADMIN_PASSWORD`; kelola di menu Admin.
 - **Pengaturan** (`/admin/settings`): kunci API gateway dan pemasok, notifikasi, data penjual. Disimpan terenkripsi AES-256-GCM (kunci dari `SETTINGS_KEY`/`SESSION_SECRET`), hanya 4 karakter terakhir yang ditampilkan, dan menimpa env.

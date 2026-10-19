@@ -97,6 +97,8 @@ export function createClient(opts: ClientOptions) {
     me: () => request<{ user: User }>('GET', '/me'),
     changePassword: (oldPassword: string, newPassword: string) =>
       request<{ token: string }>('POST', '/me/password', { old_password: oldPassword, new_password: newPassword }),
+    registerPush: (token: string, platform: string) => request<{ ok: true }>('PUT', '/me/push-token', { token, platform }),
+    unregisterPush: (token: string) => request<{ ok: true }>('DELETE', '/me/push-token', { token }),
     exportData: () => request<unknown>('GET', '/me/export'),
     deleteAccount: (password: string) => request<{ ok: true }>('DELETE', '/me', { password }),
 

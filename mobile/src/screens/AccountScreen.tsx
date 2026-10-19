@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { Alert, Modal, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Modal, Share, Switch, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { APP_VERSION } from '../config';
 import { useAuth } from '../auth';
-import { Button, Card, ErrorText, Field, H1, H2, Muted, Screen, useLoad } from '../components/ui';
+import { Button, Card, ErrorText, Field, H1, H2, Muted, Screen, Segmented, useLoad } from '../components/ui';
+import { usePush } from '../push';
 import type { Nav } from '../navigation';
-import { colors, space } from '../theme';
+import { createStyles, space, useTheme } from '../theme';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Terjadi kesalahan');
 
 export default function AccountScreen() {
+  const s = useS();
+  const { colors } = useTheme();
   const nav = useNavigation<Nav>();
   const { user, api, logout, replaceToken, clearLocal } = useAuth();
+  const push = usePush();
+  const { pref, setPref } = useTheme();
   const cfg = useLoad(() => api.config(), [api]);
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -31,6 +36,13 @@ export default function AccountScreen() {
     </Card>
   );
 
+  const appearanceCard = (
+    <Card style={{ gap: 10 }}>
+      <H2>Tampilan</H2>
+      <Segmented value={pref} onChange={setPref} options={[{ value: 'system', label: 'Sistem' }, { value: 'light', label: 'Terang' }, { value: 'dark', label: 'Gelap' }]} />
+    </Card>
+  );
+
   if (!user)
     return (
       <Screen>
@@ -38,6 +50,7 @@ export default function AccountScreen() {
         <Muted>Masuk untuk membeli, melihat pesanan, dan menyimpan produk Anda.</Muted>
         <Button title="Masuk" onPress={() => nav.navigate('Login')} />
         <Button title="Buat akun" variant="ghost" onPress={() => nav.navigate('Register')} />
+        {appearanceCard}
         {legalCard}
         <Muted>Versi {APP_VERSION}</Muted>
       </Screen>
@@ -59,11 +72,12 @@ export default function AccountScreen() {
     catch (e) { Alert.alert('Gagal', errMsg(e)); } finally { setBusy(null); }
   };
 
-  const confirmLogout = () => Alert.alert('Keluar?', 'Anda perlu masuk lagi untuk membeli.', [{ text: 'Batal', style: 'cancel' }, { text: 'Keluar', onPress: () => void logout() }]);
+  const confirmLogout = () => Alert.alert('Keluar?', 'Anda perlu masuk lagi untuk membeli.', [{ text: 'Batal', style: 'cancel' }, { text: 'Keluar', onPress: () => void push.release().then(logout) }]);
 
   const deleteAccount = async () => {
     setBusy('del'); setDelErr(null);
     try {
+      await push.release();
       await api.deleteAccount(delPw);
       setDelOpen(false); setDelPw('');
       await clearLocal();
@@ -84,6 +98,35 @@ export default function AccountScreen() {
         <Button title="Ganti password" onPress={changePassword} loading={busy === 'pw'} disabled={!oldPw || newPw.length < 8} />
       </Card>
 
+      <Card style={{ gap: 10 }}>
+        <H2>Notifikasi pesanan</H2>
+        {push.status === 'unsupported' ? (
+          <Muted>Notifikasi push tersedia di aplikasi yang terpasang di HP (bukan di simulator atau web).</Muted>
+        ) : (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Text style={s.switchLabel}>Kabari saat pembayaran diterima & produk siap</Text>
+              <Switch
+                value={push.status === 'on'}
+                disabled={push.busy}
+                onValueChange={(v) => void (v ? push.enable() : push.disable())}
+                trackColor={{ true: colors.brand }}
+                accessibilityLabel="Notifikasi pesanan"
+              />
+            </View>
+            {push.status === 'denied' ? (
+              <>
+                <ErrorText>Izin notifikasi ditolak. Aktifkan lewat Pengaturan perangkat.</ErrorText>
+                <Button title="Buka pengaturan perangkat" variant="ghost" onPress={() => void Linking.openSettings()} />
+              </>
+            ) : null}
+            <ErrorText>{push.status === 'error' ? push.message : null}</ErrorText>
+            <Muted>Notifikasi hanya berisi ringkasan; produk Anda tetap dibuka di dalam aplikasi.</Muted>
+          </>
+        )}
+      </Card>
+
+      {appearanceCard}
       {legalCard}
 
       <Card style={{ gap: 10 }}>
@@ -112,7 +155,8 @@ export default function AccountScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const useS = createStyles((colors) => ({
+  switchLabel: { flex: 1, color: colors.fg, fontSize: 15 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: space.lg },
   sheet: { backgroundColor: colors.card, borderRadius: 16, padding: space.lg, gap: 10 },
-});
+}));

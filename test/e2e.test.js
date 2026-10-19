@@ -42,6 +42,7 @@ test.before(async () => {
   process.env.MIDTRANS_API_URL = mock.url;
   process.env.MIDTRANS_SNAP_URL = mock.url;
   process.env.XENDIT_API_URL = mock.url;
+  process.env.EXPO_PUSH_URL = mock.url + '/push/send';
 });
 test.after(async () => { srv.close(); await mock.close(); });
 
@@ -323,4 +324,58 @@ test('keamanan sesi: cookie admin tidak bisa dipakai sebagai sesi pembeli & seba
   await tmp.post('/admin/logout');
   const reuse = client(); reuse.jar.adm = cookie;
   assert.strictEqual((await reuse.get('/admin')).status, 302, 'token lama tidak berlaku setelah logout');
+});
+
+test('push: daftar token, terkirim saat pesanan siap & refund, tanpa isi produk, token mati dibersihkan', async () => {
+  const c = client();
+  const reg = (email) => c.post('/api/v1/auth/register', { json: { email, name: 'Pu', password: 'rahasia123', accept_terms: true } }).then((r) => r.data.token);
+  const t1 = await reg('push1@uji.id');
+  const GOOD = 'ExponentPushToken[abcdEFGH12345678]';
+  const DEAD = 'ExponentPushToken[DeadToken12345678]';
+
+  // validasi & autentikasi
+  assert.strictEqual((await c.post('/api/v1/auth/login', { json: {} })).status, 401);
+  const put = (token, body) => fetch(base + '/api/v1/me/push-token', { method: 'PUT', headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) });
+  assert.strictEqual((await put(null, { token: GOOD })).status, 401);
+  assert.strictEqual((await put(t1, { token: 'sembarang' })).status, 400);
+  assert.strictEqual((await put(t1, { token: GOOD, platform: 'ios' })).status, 200);
+  assert.strictEqual((await put(t1, { token: DEAD, platform: 'android' })).status, 200);
+
+  // pesanan lunas → push ke semua perangkat akun, isi produk tidak ikut
+  const pid = store().db.prepare("INSERT INTO products (name, category, price) VALUES ('Push Produk','Uji',15000)").run().lastInsertRowid;
+  await owner.post(`/admin/products/${pid}/stock`, { form: { items: 'RAHASIA-PUSH|pw' } });
+  mock.state.pushes.length = 0;
+  const o = await c.post('/api/v1/orders', { token: t1, json: { product_id: Number(pid) } });
+  const id = o.data.order.id;
+  await mock.pay(o.data.pay_url.includes('xendit') ? 'xendit' : 'midtrans', `${id}-P1`);
+  await until(() => mock.state.pushes.length >= 2);
+  assert.deepStrictEqual(mock.state.pushes.map((m) => m.to).sort(), [DEAD, GOOD].sort());
+  const m = mock.state.pushes.find((x) => x.to === GOOD);
+  assert.match(m.title, /siap/i);
+  assert.strictEqual(m.data.orderId, id);
+  assert.ok(!JSON.stringify(mock.state.pushes).includes('RAHASIA-PUSH'), 'isi produk tidak boleh ada di payload push');
+  assert.deepStrictEqual(store().db.prepare('SELECT token FROM push_tokens WHERE user_id = (SELECT user_id FROM orders WHERE id = ?)').all(id).map((r) => r.token), [GOOD], 'token DeviceNotRegistered dihapus');
+
+  // tidak terkirim dua kali untuk status yang sama
+  const n = mock.state.pushes.length;
+  await require('../notify').announce(id);
+  assert.strictEqual(mock.state.pushes.length, n);
+
+  // pindah akun di perangkat yang sama → token berpindah; akun lama tak lagi menerima
+  const t2 = await reg('push2@uji.id');
+  assert.strictEqual((await put(t2, { token: GOOD })).status, 200);
+  const u2 = (await c.get('/api/v1/me', { token: t2 })).data.user.id;
+  assert.strictEqual(store().db.prepare('SELECT user_id FROM push_tokens WHERE token = ?').get(GOOD).user_id, u2, 'token pindah ke akun yang sedang masuk');
+
+  // cabut token (logout) hanya bisa oleh pemiliknya
+  const del = (token, body) => fetch(base + '/api/v1/me/push-token', { method: 'DELETE', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
+  await del(t1, { token: GOOD }); // bukan pemilik → tidak berefek
+  assert.ok(store().db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get(GOOD));
+  await del(t2, { token: GOOD });
+  assert.ok(!store().db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get(GOOD));
+
+  // hapus akun membersihkan token
+  await put(t2, { token: GOOD });
+  await c.del('/api/v1/me', { token: t2, json: { password: 'rahasia123' } });
+  assert.ok(!store().db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get(GOOD));
 });
