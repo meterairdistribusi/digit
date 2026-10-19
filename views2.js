@@ -7,7 +7,7 @@ Saya menyetujui <a href="/legal/terms" target="_blank">Syarat &amp; Ketentuan</a
 const userLogin = (error, next = '') =>
   layout(
     'Masuk',
-    `<div class="panel narrow"><h1>Masuk</h1>${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<div class="panel narrow"><h1>Masuk</h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <form method="post" action="/login" class="form"><input type="hidden" name="next" value="${esc(next)}">
 <label>Email<input type="email" name="email" required autocomplete="email"></label>
 <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
@@ -18,7 +18,7 @@ const userLogin = (error, next = '') =>
 const userRegister = (error, v = {}) =>
   layout(
     'Daftar',
-    `<div class="panel narrow"><h1>Buat akun</h1>${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<div class="panel narrow"><h1>Buat akun</h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <form method="post" action="/register" class="form">
 <label>Nama<input name="name" required maxlength="60" value="${esc(v.name)}" autocomplete="name"></label>
 <label>Email<input type="email" name="email" required value="${esc(v.email)}" autocomplete="email"></label>
@@ -33,7 +33,7 @@ const STATUS = { pending: 'Menunggu bayar', paid: 'Lunas', paid_nostock: 'Menung
 const account = (u, orders, msg) =>
   layout(
     'Akun saya',
-    `<h1>Halo, ${esc(u.name)}</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}
+    `<h1>Halo, ${esc(u.name)}</h1>${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}
 <p class="muted">${esc(u.email)}</p>
 <div class="panel"><h2>Pesanan saya</h2>${
       orders.length
@@ -82,7 +82,7 @@ ${f.source === 'admin' ? `<span class="inline"><input type="checkbox" name="clea
     'Pengaturan',
     `<h1>Pengaturan</h1>
 <div class="chips">${groups.map((x) => `<a class="${x.id === active ? 'on' : ''}" href="/admin/settings/${x.id}">${esc(x.label)}</a>`).join('')}</div>
-${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
+${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="panel"><h2>${esc(g.label)}</h2>${g.help ? `<p class="muted">${esc(g.help.replace('{BASE_URL}', process.env.BASE_URL || 'https://domain-anda'))}</p>` : ''}
 ${
   g.kind
@@ -124,7 +124,7 @@ ${i.hasCatalog && i.enabled ? `<a class="btn sm ghost" href="/admin/suppliers/${
 </td></tr>`;
   return layout(
     'Integrasi',
-    `<h1>Integrasi</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<h1>Integrasi</h1>${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 ${risky.length ? `<p class="err">⚠ Mode produksi tanpa catatan uji sandbox: ${risky.map((r) => esc(r.label)).join(', ')}. Uji dulu sebelum menerima uang sungguhan.</p>` : ''}
 <div class="panel"><p class="muted"><b>Alur go-live:</b> 1) isi kunci <b>sandbox</b> di Pengaturan → 2) <b>Uji koneksi</b> sampai sukses → 3) uji alur beli sungguhan di toko (bayar, kirim, refund) → 4) baru <b>Pindah ke produksi</b> dan ganti dengan kunci produksi. Mode produksi terkunci sampai ada uji sandbox yang lulus dalam 30 hari terakhir.</p></div>
 <div class="scroll"><table><tr><th>Integrasi</th><th>Status</th><th>Mode</th><th>Uji terakhir</th><th></th></tr>${items.map(row).join('')}</table></div>`,
@@ -136,7 +136,7 @@ ${risky.length ? `<p class="err">⚠ Mode produksi tanpa catatan uji sandbox: ${
 const adminsPage = (list, me, { msg, error }) =>
   layout(
     'Admin',
-    `<h1>Akun admin</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<h1>Akun admin</h1>${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="scroll"><table><tr><th>Username</th><th>Peran</th><th>Status</th><th></th></tr>${list
       .map(
         (a) => `<tr><td>${esc(a.username)}${a.id === me.id ? ' <small class="muted">(Anda)</small>' : ''}</td>
@@ -146,7 +146,7 @@ const adminsPage = (list, me, { msg, error }) =>
       )
       .join('')}</table></div>
 <div class="panel"><h2>Tambah admin</h2><p class="muted"><b>Pemilik</b>: semua akses termasuk Pengaturan, Integrasi, Admin, dan Refund. <b>Staf</b>: pesanan, produk, stok, kupon, laporan.</p>
-<form method="post" action="/admin/admins" class="form"><label>Username<input name="username" required pattern="[a-z0-9._-]{3,32}" autocapitalize="none"></label>
+<form method="post" action="/admin/admins" class="form"><label>Username<input name="username" required pattern="[a-z0-9._\-]{3,32}" autocapitalize="none"></label>
 <label>Password (min. 8)<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
 <label>Peran<select name="role"><option value="staff">Staf</option><option value="owner">Pemilik</option></select></label><button class="btn">Tambah</button></form></div>
 <div class="panel"><h2>Ganti password saya</h2><form method="post" action="/admin/me/password" class="form">
@@ -158,7 +158,7 @@ const adminsPage = (list, me, { msg, error }) =>
 const adminMe = (a, error) =>
   layout(
     'Akun saya',
-    `<h1>${esc(a.username)} <small class="muted">(${a.role === 'owner' ? 'Pemilik' : 'Staf'})</small></h1>${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<h1>${esc(a.username)} <small class="muted">(${a.role === 'owner' ? 'Pemilik' : 'Staf'})</small></h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="panel"><h2>Ganti password</h2><form method="post" action="/admin/me/password" class="form">
 <label>Password lama<input type="password" name="old_password" required autocomplete="current-password"></label>
 <label>Password baru (min. 8)<input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label><button class="btn">Ganti</button></form></div>`,
@@ -170,7 +170,7 @@ const orderDetail = (o, d, { msg, error, isOwner }) => {
   const canRefund = d.plan && isOwner;
   return layout(
     'Pesanan ' + o.id,
-    `<a href="/admin/orders" class="muted">← Pesanan</a><h1>${esc(o.id)}</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<a href="/admin/orders" class="muted">← Pesanan</a><h1>${esc(o.id)}</h1>${msg ? `<div class="flash ok" role="status">${esc(msg)}</div>` : ''}${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="panel"><p>${esc(o.product_name)} ×${o.qty} · <strong>${rp(o.amount)}</strong>${o.coupon_code ? ` · kupon ${esc(o.coupon_code)} −${rp(o.discount)}` : ''}</p>
 <p>Pembeli: ${esc(o.customer_name)} · ${esc(o.contact)}${o.user_id ? ` · akun #${o.user_id}` : ' · tamu'}</p><p>Status: <b>${esc(o.status)}</b> · ${esc(o.created_at)}</p></div>
 <div class="panel"><h2>Pembayaran</h2><table><tr><th>Ref</th><th>Gateway</th><th>Status</th></tr>${d.attempts

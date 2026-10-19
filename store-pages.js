@@ -97,7 +97,7 @@ ${filtering ? '' : `<section class="hero" aria-label="Promo">
   <div><span class="ti">${icon('refund', 20)}</span><span><b>Refund jika gagal</b><small>Dana kembali bila tak terkirim</small></span></div>
   <div><span class="ti">${icon('chat', 20)}</span><span><b>Bantuan cepat</b><small>${WA() ? 'Via WhatsApp' : 'Hubungi penjual'}</small></span></div>
 </section>`}
-${!filtering && promo.length ? `<section class="section"><div class="section-head"><div><h2>🔥 Promo spesial</h2><p>Harga hemat untuk produk pilihan</p></div></div><div class="rail">${promo.map(card).join('')}</div></section>` : ''}
+${!filtering && promo.length ? `<section class="section" data-promo><div class="section-head"><div><h2>🔥 Promo spesial</h2><p>Harga hemat untuk produk pilihan</p></div></div><div class="rail">${promo.map(card).join('')}</div></section>` : ''}
 <section class="section" id="produk"><div class="section-head"><div><h2>${q ? `Hasil untuk “${esc(q)}”` : active ? esc(active) : 'Semua produk'}</h2><p>${products.length} produk tersedia</p></div></div>
   <div class="chips" role="navigation" aria-label="Kategori">${catChip('', 0)}${cats.map((c) => catChip(c)).join('')}</div>
   <div class="toolbar"><label class="grow">${icon('search', 18)}<input data-search value="${esc(q)}" placeholder="Cari produk…" aria-label="Cari produk" autocomplete="off"></label>

@@ -18,6 +18,7 @@
       const q = (search?.value || '').trim().toLowerCase();
       let n = 0;
       order.forEach(([c]) => { const ok = !q || c.dataset.name.includes(q); c.hidden = !ok; if (ok) n++; });
+      const promo = $('[data-promo]'); if (promo) promo.hidden = Boolean(q); // saat mencari, tampilkan hanya hasil pencarian
       const by = sort?.value;
       const sorted = [...order].sort((a, b) => by === 'sold' ? b[0].dataset.sold - a[0].dataset.sold : by === 'low' ? a[0].dataset.price - b[0].dataset.price : by === 'high' ? b[0].dataset.price - a[0].dataset.price : a[1] - b[1]);
       sorted.forEach(([c]) => grid.appendChild(c));

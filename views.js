@@ -11,7 +11,7 @@ const track = (error) =>
   layout(
     'Lacak pesanan',
     `<div class="panel narrow"><h1>Lacak pesanan</h1><p class="muted">Masukkan ID pesanan dan kontak yang dipakai saat checkout.</p>
-${error ? `<p class="err">${esc(error)}</p>` : ''}
+${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <form method="post" action="/track" class="form"><label>ID pesanan<input name="id" required placeholder="ORD-XXXXXXXXXX" autocapitalize="characters"></label>
 <label>WhatsApp / Email<input name="contact" required></label><button class="btn">Cari pesanan</button></form></div>`
   );
@@ -47,7 +47,7 @@ ${table(['Keandalan pemasok', 'Pemasok', 'Berhasil', 'Gagal', 'Pending/tak pasti
 const adminCoupons = (list, error) =>
   layout(
     'Kupon',
-    `<h1>Kupon</h1>${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<h1>Kupon</h1>${error ? `<div class="flash err" role="alert">${esc(error)}</div>` : ''}
 <div class="scroll"><table><tr><th>Kode</th><th>Potongan</th><th>Min. belanja</th><th>Dipakai</th><th>Kedaluwarsa</th><th>Status</th><th></th></tr>${list
       .map(
         (c) => `<tr><td><code>${esc(c.code)}</code></td><td>${c.type === 'percent' ? c.value + '%' : rp(c.value)}</td><td>${rp(c.min_amount)}</td>

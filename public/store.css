@@ -146,3 +146,4 @@ details summary{cursor:pointer}
 @media (max-width:420px){.trust{grid-template-columns:1fr 1fr}.trust div{padding:10px 12px}.trust .ti{display:none}}
 @media print{.top,.tabbar,.sticky-buy,.foot{display:none}}
 label{align-content:start}
+.flash{padding:12px 16px;border-radius:14px;margin:14px 0;font-weight:500}.flash.ok{background:var(--ok-soft);color:var(--ok)}.flash.err{background:var(--bad-soft);color:var(--bad)}
