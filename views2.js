@@ -170,7 +170,7 @@ const orderDetail = (o, d, { msg, error, isOwner }) => {
   const canRefund = d.plan && isOwner;
   return layout(
     'Pesanan ' + o.id,
-    `<a href="/admin" class="muted">← Pesanan</a><h1>${esc(o.id)}</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
+    `<a href="/admin/orders" class="muted">← Pesanan</a><h1>${esc(o.id)}</h1>${msg ? `<p class="ok">${esc(msg)}</p>` : ''}${error ? `<p class="err">${esc(error)}</p>` : ''}
 <div class="panel"><p>${esc(o.product_name)} ×${o.qty} · <strong>${rp(o.amount)}</strong>${o.coupon_code ? ` · kupon ${esc(o.coupon_code)} −${rp(o.discount)}` : ''}</p>
 <p>Pembeli: ${esc(o.customer_name)} · ${esc(o.contact)}${o.user_id ? ` · akun #${o.user_id}` : ' · tamu'}</p><p>Status: <b>${esc(o.status)}</b> · ${esc(o.created_at)}</p></div>
 <div class="panel"><h2>Pembayaran</h2><table><tr><th>Ref</th><th>Gateway</th><th>Status</th></tr>${d.attempts

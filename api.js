@@ -7,6 +7,7 @@ const legal = require('./legal');
 const settings = require('./settings');
 const push = require('./push');
 const { placeOrder, decorate, CheckoutError } = require('./checkout');
+const { cover } = require('./cover');
 
 // REST API untuk aplikasi pembeli Android/iPhone (dan PWA). Auth: header "Authorization: Bearer <token>".
 // Semua respons JSON. Kesalahan: { error: "pesan" } dengan status HTTP yang sesuai.
@@ -40,9 +41,15 @@ const auth = (req, res, next) => {
   next();
 };
 
-const publicProduct = (p) => ({
+// Gambar: unggahan sendiri → URL absolut; URL luar apa adanya; tanpa gambar → null (aplikasi menggambar sampul dari `cover`)
+const publicProduct = (p, req) => ({
   id: p.id, name: p.name, category: p.category, description: p.description, price: p.price,
-  orderable: p.orderable, in_stock: p.available > 0, max_qty: p.maxQty,
+  compare_at: p.compare_at && p.compare_at > p.price ? p.compare_at : null,
+  discount_percent: p.compare_at && p.compare_at > p.price ? Math.round((1 - p.price / p.compare_at) * 100) : 0,
+  badge: p.badge || '', featured: Boolean(p.featured), sold: p.sold || 0,
+  image: p.image ? (p.image.startsWith('http') ? p.image : baseUrl(req) + p.image) : null,
+  cover: cover(p),
+  orderable: p.orderable, in_stock: p.available > 0, low_stock: !p.viaSupplier && p.available > 0 && p.available <= 5, max_qty: p.maxQty,
 });
 const publicOrder = (o, req, withItems = false) => ({
   id: o.id, product: o.product_name, qty: o.qty, amount: o.amount, discount: o.discount || 0, coupon: o.coupon_code || null,
@@ -57,6 +64,7 @@ r.get('/config', (req, res) =>
     store_name: settings.get('STORE_NAME') || 'Toko Digital',
     whatsapp: (settings.get('WHATSAPP_NUMBER') || '').replace(/\D/g, ''),
     payments_enabled: payments.anyEnabled(),
+    banner: { title: settings.get('BANNER_TITLE') || 'Produk digital premium, harga hemat', text: settings.get('BANNER_TEXT') || 'Bayar mudah, produk dikirim otomatis.', code: (settings.get('BANNER_CODE') || '').toUpperCase() },
     legal: legal.names().map((n) => ({ name: n, title: legal.doc(n).title, url: `${baseUrl(req)}/legal/${n}` })),
   })
 );
@@ -125,11 +133,11 @@ r.delete('/me', auth, limit('del', 5, 15 * 60e3), (req, res) => {
 
 // ---------- Katalog ----------
 r.get('/categories', (req, res) => res.json(store.categories()));
-r.get('/products', (req, res) => res.json(store.listProducts(true, req.query.category ? String(req.query.category) : null).map(decorate).map(publicProduct)));
+r.get('/products', (req, res) => res.json(store.listProducts(true, req.query.category ? String(req.query.category) : null).map(decorate).map((p) => publicProduct(p, req))));
 r.get('/products/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p || !p.active) return res.status(404).json({ error: 'Produk tidak ditemukan' });
-  res.json(publicProduct(decorate(p)));
+  res.json(publicProduct(decorate(p), req));
 });
 
 r.post('/coupons/check', (req, res) => {

@@ -25,7 +25,7 @@ test('klien native: alur lengkap daftar → beli → bayar → terima produk →
   const api = mod.createClient({ baseUrl: base + '/', getToken: () => token, onUnauthorized: () => expired++ });
 
   const cfg = await api.config();
-  assert.ok(cfg.store_name);
+  assert.ok(cfg.store_name && cfg.banner.title && typeof cfg.banner.code === 'string');
   const legal = await api.legalList();
   assert.deepStrictEqual(legal.map((d) => d.name).sort(), ['privacy', 'refund', 'terms']);
   assert.ok((await api.legal('privacy')).markdown.length > 200);
@@ -48,6 +48,8 @@ test('klien native: alur lengkap daftar → beli → bayar → terima produk →
   const list = await api.products('Streaming');
   const p = list.find((x) => x.id === pid);
   assert.ok(p && p.orderable);
+  assert.ok(p.cover && /^#[0-9a-f]{6}$/i.test(p.cover.c1) && p.cover.title === 'Netflix', 'sampul untuk aplikasi native');
+  assert.deepStrictEqual([p.image, p.compare_at, p.discount_percent, p.badge, typeof p.sold], [null, null, 0, '', 'number']);
   assert.strictEqual((await api.product(pid)).name, 'Netflix Uji');
   assert.deepStrictEqual(await api.checkCoupon(pid, 1, 'native10'), { discount: 4500, total: 40500 });
   await assert.rejects(api.checkCoupon(pid, 1, 'SALAH'), /tidak valid/);

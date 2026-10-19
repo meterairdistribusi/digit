@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS coupons (
 );
 `);
 addColumn('orders', 'user_id', 'INTEGER');
+addColumn('products', 'image', 'TEXT');
+addColumn('products', 'compare_at', 'INTEGER');
+addColumn('products', 'badge', "TEXT NOT NULL DEFAULT ''");
+addColumn('products', 'featured', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE TABLE IF NOT EXISTS users (
@@ -176,29 +180,31 @@ CREATE INDEX IF NOT EXISTS idx_push_user ON push_tokens(user_id);
 // order status: pending | paid | paid_sourcing (menunggu pemasok) | paid_nostock | failed
 // attempt status: pending | paid | paid_duplicate | failed
 
+// [nama, kategori, deskripsi, harga, harga coret, label, unggulan]
 const SAMPLE = [
-  ['Netflix Premium 1 Bulan', 'Streaming', 'Akun Netflix Premium 1 profil, garansi selama masa aktif.', 35000],
-  ['YouTube Premium 1 Bulan', 'Streaming', 'YouTube Premium tanpa iklan + YouTube Music.', 15000],
-  ['CapCut Pro 1 Bulan', 'Editing', 'Akses CapCut Pro: template, efek, dan export tanpa watermark.', 25000],
-  ['Canva Pro 1 Bulan', 'Editing', 'Canva Pro: Brand Kit, Magic Resize, ribuan template premium.', 10000],
-  ['ChatGPT Plus 1 Bulan', 'AI', 'Akses ChatGPT Plus selama 1 bulan.', 60000],
-  ['Claude Pro 1 Bulan', 'AI', 'Akses Claude Pro selama 1 bulan.', 65000],
+  ['Netflix Premium 1 Bulan', 'Streaming', 'Akun Netflix Premium 1 profil, garansi selama masa aktif.', 35000, 54000, 'Terlaris', 1],
+  ['YouTube Premium 1 Bulan', 'Streaming', 'YouTube Premium tanpa iklan + YouTube Music.', 15000, 24000, '', 0],
+  ['CapCut Pro 1 Bulan', 'Editing', 'Akses CapCut Pro: template, efek, dan export tanpa watermark.', 25000, null, '', 0],
+  ['Canva Pro 1 Bulan', 'Editing', 'Canva Pro: Brand Kit, Magic Resize, ribuan template premium.', 10000, 17000, 'Promo', 1],
+  ['ChatGPT Plus 1 Bulan', 'AI', 'Akses ChatGPT Plus selama 1 bulan.', 60000, null, '', 1],
+  ['Claude Pro 1 Bulan', 'AI', 'Akses Claude Pro selama 1 bulan.', 65000, null, 'Baru', 0],
 ];
 if (db.prepare('SELECT COUNT(*) c FROM products').get().c === 0) {
-  const ins = db.prepare('INSERT INTO products (name, category, description, price) VALUES (?,?,?,?)');
+  const ins = db.prepare('INSERT INTO products (name, category, description, price, compare_at, badge, featured) VALUES (?,?,?,?,?,?,?)');
   for (const p of SAMPLE) ins.run(...p);
 }
 
+const SOLD = "(SELECT COALESCE(SUM(o.qty),0) FROM orders o WHERE o.product_id = p.id AND (o.status LIKE 'paid%'))";
 const listProducts = (activeOnly = true, category = null) =>
   db.prepare(`
-    SELECT p.*, (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NULL) AS available
+    SELECT p.*, ${SOLD} AS sold, (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NULL) AS available
     FROM products p
     WHERE (? = 0 OR p.active = 1) AND (? IS NULL OR p.category = ?)
-    ORDER BY p.category, p.name`).all(activeOnly ? 1 : 0, category, category);
+    ORDER BY p.featured DESC, p.category, p.name`).all(activeOnly ? 1 : 0, category, category);
 
 const getProduct = (id) =>
   db.prepare(`
-    SELECT p.*, (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NULL) AS available
+    SELECT p.*, ${SOLD} AS sold, (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NULL) AS available
     FROM products p WHERE p.id = ?`).get(id);
 
 const categories = () =>
@@ -322,7 +328,13 @@ const ORDER_SELECT = `
     (SELECT COUNT(*) FROM supplier_tx t WHERE t.order_id = o.id AND t.status = 'unknown') AS unknown_tx
   FROM orders o JOIN products p ON p.id = o.product_id`;
 
-function searchOrders({ status = '', q = '', page = 1, size = 25 } = {}) {
+const FLAGS = {
+  refund_failed: "EXISTS (SELECT 1 FROM refunds r WHERE r.order_id = o.id AND r.status = 'failed' AND NOT EXISTS (SELECT 1 FROM refunds r2 WHERE r2.attempt_ref = r.attempt_ref AND r2.status IN ('pending','succeeded')))",
+  unknown: "EXISTS (SELECT 1 FROM supplier_tx t WHERE t.order_id = o.id AND t.status = 'unknown')",
+  dup: "EXISTS (SELECT 1 FROM payment_attempts a WHERE a.order_id = o.id AND a.status = 'paid_duplicate' AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.attempt_ref = a.ref AND r.status IN ('pending','succeeded')))",
+};
+
+function searchOrders({ status = '', q = '', page = 1, size = 25, flag = '' } = {}) {
   const where = [];
   const args = [];
   if (status === 'paid') where.push("o.status LIKE 'paid%'");
@@ -331,6 +343,7 @@ function searchOrders({ status = '', q = '', page = 1, size = 25 } = {}) {
     where.push('(o.id LIKE ? OR o.customer_name LIKE ? OR o.contact LIKE ?)');
     args.push(...Array(3).fill(`%${q}%`));
   }
+  if (FLAGS[flag]) where.push(FLAGS[flag]);
   const w = where.length ? ' WHERE ' + where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) c FROM orders o${w}`).get(...args).c;
   const pages = Math.max(1, Math.ceil(total / size));
@@ -379,7 +392,68 @@ const toggleCoupon = (code) => db.prepare('UPDATE coupons SET active = 1 - activ
 const claimNotice = (orderId, status) =>
   db.prepare('UPDATE orders SET notified = ? WHERE id = ? AND COALESCE(notified, \'\') != ?').run(status, orderId, status).changes > 0;
 
+// ---------- Stok & dasbor ----------
+const LOW_STOCK = () => Math.max(1, parseInt(process.env.LOW_STOCK, 10) || 5);
+
+function stockOverview() {
+  return db
+    .prepare(
+      `SELECT p.id, p.name, p.category, p.active, p.image,
+        (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NULL) AS available,
+        (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.order_id IS NOT NULL) AS used,
+        (SELECT COUNT(*) FROM product_sources ps WHERE ps.product_id = p.id AND ps.active = 1) AS sources
+       FROM products p ORDER BY available ASC, p.name`
+    )
+    .all();
+}
+
+const orderCounts = () => Object.fromEntries(db.prepare('SELECT status, COUNT(*) c FROM orders GROUP BY status').all().map((r) => [r.status, r.c]));
+
+// Jumlah hal yang perlu tindakan admin (untuk lencana di menu)
+const attentionCount = () =>
+  db.prepare("SELECT COUNT(*) c FROM orders WHERE status = 'paid_nostock'").get().c +
+  db.prepare("SELECT COUNT(DISTINCT order_id) c FROM supplier_tx WHERE status = 'unknown'").get().c;
+
+// Angka dasbor. Periode dibandingkan dengan periode sebelumnya yang sama panjang.
+function dashboard(days = 30) {
+  const sum = (from, to) =>
+    db
+      .prepare(
+        `SELECT COUNT(*) orders, COALESCE(SUM(amount),0) revenue FROM orders
+         WHERE status LIKE 'paid%' AND date(created_at) >= date('now', ?) AND date(created_at) < date('now', ?)`
+      )
+      .get(from, to);
+  const cur = sum(`-${days - 1} days`, '+1 day');
+  const prev = sum(`-${days * 2 - 1} days`, `-${days - 1} days`);
+  const today = db.prepare("SELECT COUNT(*) orders, COALESCE(SUM(amount),0) revenue FROM orders WHERE status LIKE 'paid%' AND date(created_at) = date('now')").get();
+  const series = db
+    .prepare(`SELECT date(created_at) day, COUNT(*) orders, SUM(amount) revenue FROM orders WHERE status LIKE 'paid%' AND date(created_at) >= date('now', ?) GROUP BY day`)
+    .all(`-${days - 1} days`);
+  const byDay = new Map(series.map((r) => [r.day, r]));
+  const daily = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
+    daily.push({ day: d, orders: byDay.get(d)?.orders || 0, revenue: byDay.get(d)?.revenue || 0 });
+  }
+  const counts = Object.fromEntries(db.prepare('SELECT status, COUNT(*) c FROM orders GROUP BY status').all().map((r) => [r.status, r.c]));
+  const attention = {
+    nostock: counts.paid_nostock || 0,
+    sourcing: counts.paid_sourcing || 0,
+    pending: counts.pending || 0,
+    refundFailed: db.prepare("SELECT COUNT(DISTINCT order_id) c FROM refunds r WHERE status = 'failed' AND NOT EXISTS (SELECT 1 FROM refunds r2 WHERE r2.attempt_ref = r.attempt_ref AND r2.status IN ('pending','succeeded'))").get().c,
+    unknownTx: db.prepare("SELECT COUNT(DISTINCT order_id) c FROM supplier_tx WHERE status = 'unknown'").get().c,
+    dupOpen: db.prepare("SELECT COUNT(*) c FROM payment_attempts a WHERE a.status = 'paid_duplicate' AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.attempt_ref = a.ref AND r.status IN ('pending','succeeded'))").get().c,
+  };
+  const top = db
+    .prepare(`SELECT p.id, p.name, p.image, SUM(o.qty) qty, SUM(o.amount) revenue FROM orders o JOIN products p ON p.id = o.product_id WHERE o.status LIKE 'paid%' AND date(o.created_at) >= date('now', ?) GROUP BY p.id ORDER BY revenue DESC LIMIT 5`)
+    .all(`-${days - 1} days`);
+  const low = stockOverview().filter((p) => p.active && p.sources === 0 && p.available <= LOW_STOCK());
+  const recent = searchOrders({ size: 6 }).rows;
+  return { cur, prev, today, daily, counts, attention, top, low, recent, users: db.prepare('SELECT COUNT(*) c FROM users').get().c };
+}
+
 module.exports = {
+  orderCounts, attentionCount, stockOverview, dashboard, LOW_STOCK,
   ordersOfUser, addColumn,
   applyCoupon, getCoupon, listCoupons, saveCoupon, toggleCoupon, searchOrders, orderStats, salesReport, findOrderByContact, claimNotice,
   db, listProducts, getProduct, categories, getOrder, orderItems, createOrder, fulfillLocal, markFailed,

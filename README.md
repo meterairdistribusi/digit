@@ -71,7 +71,7 @@ Placeholder: `{{sku}} {{ref}} {{customer}} {{signature}} {{token}}`, dan `${NAMA
 
 ## Akun, aplikasi mobile, dan admin
 
-> **Lihat admin tanpa menyiapkan apa pun:** `npm run demo` lalu buka http://localhost:3000/admin (admin / admin). Berisi data contoh lengkap (pesanan, refund, kupon, laporan, integrasi). Tangkapan layar: [docs/admin/](docs/admin/README.md).
+> **Lihat admin tanpa menyiapkan apa pun:** `npm run demo` lalu buka http://localhost:3000/admin (admin / admin). Berisi data contoh lengkap (pesanan, refund, kupon, laporan, integrasi). Tangkapan layar: [admin](docs/admin/README.md) dan [toko](docs/store/README.md).
 
 - **Akun pembeli**: daftar/masuk di web (`/register`, `/login`, `/account`) atau lewat **API** (`/api/v1`, token Bearer) untuk aplikasi Android/iPhone. Hapus akun, unduh data, dan ganti password tersedia di web dan API. Password di-hash (scrypt); sesi disimpan sebagai hash token.
 - **Aplikasi native Android & iPhone**: folder [`mobile/`](mobile/README.md) (React Native + Expo) memakai API `/api/v1`, dengan **mode gelap** dan **notifikasi push**: katalog, kupon, daftar/masuk, beli & bayar, pesanan, produk terkirim, hapus akun, dokumen hukum. Cara menjalankan, build, dan catatan kebijakan toko aplikasi ada di `mobile/README.md`.

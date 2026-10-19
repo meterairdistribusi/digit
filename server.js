@@ -14,6 +14,10 @@ const api = require('./api');
 const { placeOrder, decorate, CheckoutError } = require('./checkout');
 const v = require('./views');
 const v2 = require('./views2');
+const ap = require('./admin-pages');
+const uploads = require('./uploads');
+const coverArt = require('./cover');
+const ctx = require('./ctx');
 
 const PROD = process.env.NODE_ENV === 'production';
 if (accounts.bootstrapAdmin()) console.log('Admin pertama dibuat: username "admin" (password dari ADMIN_PASSWORD). Segera ganti di menu Admin.');
@@ -25,13 +29,25 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 // API mobile punya parser JSON sendiri (agar JSON rusak dijawab sebagai JSON), jadi dipasang sebelum parser global
 app.use('/api/v1', api);
-app.use(express.urlencoded({ extended: false }));
+const smallForm = express.urlencoded({ extended: false, limit: '100kb' });
+app.use((req, res, next) => (req.path.startsWith('/admin/products') ? next() : smallForm(req, res, next)));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// Gambar produk hasil unggahan: nama berbasis hash (tak berubah) → cache panjang; tipe tetap + nosniff
+app.use('/uploads', (req, res, next) => express.static(uploads.dir(), { index: false, dotfiles: 'deny', maxAge: '365d', immutable: true, setHeaders: (r, f) => r.set({ 'X-Content-Type-Options': 'nosniff', 'Content-Type': uploads.typeOf(f), 'Content-Security-Policy': "default-src 'none'" }) })(req, res, next));
+// Sampul otomatis untuk produk tanpa gambar
+app.get('/img/p/:id.svg', (req, res) => {
+  const p = store.getProduct(Number(req.params.id));
+  if (!p) return res.status(404).end();
+  res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" }).send(coverArt.svg(p));
+});
 app.use((req, res, next) => {
   res.set({ 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
   next();
 });
+
+// Konteks per permintaan untuk tampilan etalase (pengguna yang masuk + path)
+app.use((req, res, next) => (/^\/(api|uploads|img|pay|admin)\b|\.\w+$/.test(req.path) ? next() : ctx.als.run({ user: userOf(req), path: req.path }, next)));
 
 const baseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
 const crypto = require('crypto');
@@ -71,13 +87,17 @@ app.get('/legal/:doc', (req, res) => {
 // ---------- Toko ----------
 app.get('/', (req, res) => {
   const c = req.query.c ? String(req.query.c) : null;
-  res.send(v.home(store.listProducts(true, c).map(decorate), store.categories(), c));
+  const q = String(req.query.q || '').trim().slice(0, 60);
+  const t = q.toLowerCase();
+  const list = store.listProducts(true, c).map(decorate).filter((p) => !t || `${p.name} ${p.description} ${p.category}`.toLowerCase().includes(t));
+  res.send(v.home(list, store.categories(), c, { q }));
 });
 
 app.get('/product/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p || !p.active) return res.status(404).send(v.notFound());
-  res.send(v.productPage(decorate(p), undefined, userOf(req)));
+  const related = store.listProducts(true).filter((x) => x.id !== p.id && x.category === p.category).slice(0, 4).map(decorate);
+  res.send(v.productPage(decorate(p), undefined, userOf(req), related));
 });
 
 app.post(
@@ -260,21 +280,21 @@ const requireAdmin = (req, res, next) => {
   const a = accounts.sessionSubject('admin', cookieOf(req, 'adm'));
   if (!a) return res.redirect('/admin/login');
   req.admin = a;
-  next();
+  ctx.als.run({ admin: a, path: req.originalUrl.split('?')[0] }, next);
 };
 // Hanya Pemilik: pengaturan kunci API, integrasi, akun admin, refund
 const requireOwner = (req, res, next) =>
   req.admin.role === 'owner' ? next() : res.status(403).send(v.layout('Akses ditolak', '<div class="panel"><h1>Akses ditolak</h1><p>Hanya Pemilik yang dapat membuka halaman ini.</p></div>', { admin: true }));
 
-app.get('/admin/login', (req, res) => res.send(v.adminLogin()));
+app.get('/admin/login', (req, res) => res.send(ap.login()));
 app.post('/admin/login', (req, res) => {
   const username = String(req.body.username || '').toLowerCase();
   const key = 'alogin:' + req.ip + ':' + username;
-  if (blocked(key)) return res.status(429).send(v.adminLogin('Terlalu banyak percobaan, coba lagi nanti'));
+  if (blocked(key)) return res.status(429).send(ap.login('Terlalu banyak percobaan, coba lagi nanti'));
   const a = accounts.authAdmin(username, req.body.password);
   if (!a) {
     fail(key);
-    return res.status(401).send(v.adminLogin('Username atau password salah'));
+    return res.status(401).send(ap.login('Username atau password salah'));
   }
   tries.delete(key);
   res.cookie('adm', accounts.createSession('admin', a.id, 'web'), { httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: 12 * 3600e3 });
@@ -287,16 +307,23 @@ app.post('/admin/logout', (req, res) => {
 });
 
 app.use('/admin', requireAdmin);
+// Formulir produk membawa gambar (data URL hasil perkecil di browser) → batas lebih besar, hanya untuk admin yang sudah masuk
+app.use('/admin/products', express.urlencoded({ extended: false, limit: '1200kb' }));
 
-// ---------- Admin: pesanan ----------
+// ---------- Admin: dasbor & pesanan ----------
 app.get('/admin', (req, res) => {
-  const f = { status: String(req.query.status || ''), q: String(req.query.q || '').trim().slice(0, 60), page: parseInt(req.query.page, 10) || 1 };
-  res.send(v.adminOrders(store.searchOrders(f), store.orderStats(), f));
+  const days = [7, 30, 90].find((d) => d === parseInt(req.query.days, 10)) || 30;
+  res.send(ap.dashboard(store.dashboard(days), { days, user: req.admin }));
+});
+
+app.get('/admin/orders', (req, res) => {
+  const f = { status: String(req.query.status || ''), q: String(req.query.q || '').trim().slice(0, 60), page: parseInt(req.query.page, 10) || 1, flag: String(req.query.flag || '') };
+  res.send(ap.orders(store.searchOrders(f), store.orderCounts(), f));
 });
 
 app.post('/admin/orders/:id/fulfill', (req, res) => {
   fulfill.settle(req.params.id).catch((e) => console.error('[settle]', e));
-  res.redirect('/admin');
+  res.redirect('/admin/orders');
 });
 
 app.get('/admin/orders/:id', (req, res) => {
@@ -333,51 +360,95 @@ app.post(
   })
 );
 
-app.get('/admin/products', (req, res) => res.send(v.adminProducts(store.listProducts(false))));
+// ---------- Admin: produk & stok ----------
+const BADGES = ['Promo', 'Terlaris', 'Baru', 'Terbatas'];
+const productFields = (b) => {
+  const price = Math.max(1000, parseInt(b.price, 10) || 0);
+  const cmp = parseInt(b.compare_at, 10) || 0;
+  return {
+    name: String(b.name || '').trim().slice(0, 80),
+    category: String(b.category || 'Lainnya').trim().slice(0, 40) || 'Lainnya',
+    price,
+    compare_at: cmp > price ? cmp : null,
+    badge: BADGES.includes(b.badge) ? b.badge : '',
+    featured: b.featured ? 1 : 0,
+    active: b.active ? 1 : 0,
+    description: String(b.description || '').trim().slice(0, 500),
+  };
+};
+// Gambar: unggahan baru > hapus > URL https > tetap seperti semula
+function imageFor(b, current) {
+  if (b.image_data) return uploads.saveDataUrl(b.image_data);
+  if (b.image_remove === '1') return null;
+  const url = String(b.image_url || '').trim();
+  if (url) return uploads.cleanImageRef(url);
+  return current && /^https:/.test(current) ? null : current || null; // URL luar yang dikosongkan = dihapus
+}
+const supplierNames = () => Object.values(suppliers.adapters()).filter((a) => a.enabled()).map((a) => a.name);
+const withSupplierInfo = (p) => ((p.viaSupplier = store.listSources(p.id).some((s) => suppliers.get(s.supplier)?.enabled())), p);
+const formView = (res, p, extra = {}, status = 200) => {
+  const exists = p.id && store.getProduct(p.id);
+  res.status(status).send(ap.productForm(p, {
+    isNew: !exists, categories: store.db.prepare('SELECT DISTINCT category FROM products ORDER BY category').all().map((r) => r.category),
+    stock: exists ? store.db.prepare('SELECT * FROM stock WHERE product_id = ? ORDER BY id DESC LIMIT 500').all(p.id) : [],
+    sources: exists ? store.listSources(p.id) : [], supplierNames: supplierNames(), ...extra,
+  }));
+};
 
-const productFields = (b) => ({
-  name: String(b.name || '').trim().slice(0, 80),
-  category: String(b.category || 'Lainnya').trim().slice(0, 40) || 'Lainnya',
-  price: Math.max(1000, parseInt(b.price, 10) || 0),
-  description: String(b.description || '').trim().slice(0, 500),
-});
+app.get('/admin/products', (req, res) => res.send(ap.products(store.listProducts(false).map(withSupplierInfo), { filter: String(req.query.filter || ''), msg: req.query.m })));
+app.get('/admin/products/new', (req, res) => formView(res, { price: '', category: '', badge: '', featured: 0, active: 1 }));
 
 app.post('/admin/products', (req, res) => {
   const f = productFields(req.body);
-  if (!f.name) return res.redirect('/admin/products');
-  const r = store.db
-    .prepare('INSERT INTO products (name, category, description, price) VALUES (?,?,?,?)')
-    .run(f.name, f.category, f.description, f.price);
-  res.redirect('/admin/products/' + r.lastInsertRowid);
+  const back = { ...f, ...req.body, price: req.body.price, compare_at: req.body.compare_at };
+  if (!f.name) return formView(res, back, { error: 'Nama produk wajib diisi' }, 400);
+  let image;
+  try { image = imageFor(req.body, null); } catch (e) { return formView(res, back, { error: e.message }, 400); }
+  const r = store.db.prepare('INSERT INTO products (name, category, description, price, compare_at, badge, featured, active, image) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(f.name, f.category, f.description, f.price, f.compare_at, f.badge, f.featured, f.active, image);
+  res.redirect(`/admin/products/${r.lastInsertRowid}?m=` + encodeURIComponent('Produk dibuat. Sekarang isi stoknya.') + '#stok');
 });
 
 app.get('/admin/products/:id', (req, res) => {
   const p = store.getProduct(Number(req.params.id));
   if (!p) return res.status(404).send(v.notFound());
-  const stock = store.db.prepare('SELECT * FROM stock WHERE product_id = ? ORDER BY id DESC').all(p.id);
-  res.send(v.adminProduct(p, stock, store.listSources(p.id), Object.values(suppliers.adapters()).filter((a) => a.enabled()).map((a) => a.name)));
+  formView(res, p, { msg: req.query.m });
 });
 
 app.post('/admin/products/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const cur = store.getProduct(id);
+  if (!cur) return res.status(404).send(v.notFound());
   const f = productFields(req.body);
-  store.db
-    .prepare('UPDATE products SET name=?, category=?, description=?, price=?, active=? WHERE id=?')
-    .run(f.name, f.category, f.description, f.price, req.body.active ? 1 : 0, Number(req.params.id));
-  res.redirect('/admin/products/' + Number(req.params.id));
+  if (!f.name) return formView(res, { ...cur, ...req.body, id }, { error: 'Nama produk wajib diisi' }, 400);
+  let image;
+  try { image = imageFor(req.body, cur.image); } catch (e) { return formView(res, { ...cur, ...f, id }, { error: e.message }, 400); }
+  store.db.prepare('UPDATE products SET name=?, category=?, description=?, price=?, compare_at=?, badge=?, featured=?, active=?, image=? WHERE id=?')
+    .run(f.name, f.category, f.description, f.price, f.compare_at, f.badge, f.featured, f.active, image, id);
+  res.redirect(`/admin/products/${id}?m=` + encodeURIComponent('Perubahan disimpan'));
 });
+
+app.post('/admin/products/:id/toggle', (req, res) => {
+  store.db.prepare('UPDATE products SET active = 1 - active WHERE id = ?').run(Number(req.params.id));
+  res.redirect('/admin/products');
+});
+
+app.get('/admin/stock', (req, res) => res.send(ap.stock(store.stockOverview(), { filter: String(req.query.filter || ''), msg: req.query.m })));
 
 app.post('/admin/products/:id/stock', (req, res) => {
   const id = Number(req.params.id);
   const lines = String(req.body.items || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const ins = store.db.prepare('INSERT INTO stock (product_id, content) VALUES (?, ?)');
   store.db.transaction(() => lines.forEach((l) => ins.run(id, l)))();
-  res.redirect('/admin/products/' + id);
+  const msg = `${lines.length} item stok ditambahkan`;
+  if (req.query.back === 'stock') return res.redirect('/admin/stock?m=' + encodeURIComponent(msg));
+  res.redirect(`/admin/products/${id}?m=${encodeURIComponent(msg)}#stok`);
 });
 
 app.post('/admin/stock/:id/delete', (req, res) => {
   const s = store.db.prepare('SELECT product_id FROM stock WHERE id = ?').get(Number(req.params.id));
   store.db.prepare('DELETE FROM stock WHERE id = ? AND order_id IS NULL').run(Number(req.params.id));
-  res.redirect(s ? '/admin/products/' + s.product_id : '/admin/products');
+  res.redirect(s ? '/admin/products/' + s.product_id + '#stok' : '/admin/products');
 });
 
 app.post('/admin/products/:id/sources', (req, res) => {
@@ -385,13 +456,13 @@ app.post('/admin/products/:id/sources', (req, res) => {
   const supplier = String(req.body.supplier || '');
   const sku = String(req.body.sku || '').trim().slice(0, 100);
   if (suppliers.get(supplier) && sku) store.addSource(id, supplier, sku, Math.max(1, parseInt(req.body.priority, 10) || 1));
-  res.redirect('/admin/products/' + id);
+  res.redirect('/admin/products/' + id + '#stok');
 });
 
 app.post('/admin/sources/:id/delete', (req, res) => {
   const s = store.db.prepare('SELECT product_id FROM product_sources WHERE id = ?').get(Number(req.params.id));
   store.deleteSource(Number(req.params.id));
-  res.redirect(s ? '/admin/products/' + s.product_id : '/admin/products');
+  res.redirect(s ? '/admin/products/' + s.product_id + '#stok' : '/admin/products');
 });
 
 // ---------- Admin: laporan & kupon ----------
@@ -557,6 +628,8 @@ app.post('/admin/me/password', (req, res) => {
 app.get('/healthz', (req, res) => res.send('ok'));
 app.use((req, res) => res.status(404).send(v.notFound()));
 app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') return res.status(413).send('Data yang dikirim terlalu besar. Perkecil gambar lalu coba lagi.');
+  if (err.type === 'entity.parse.failed') return res.status(400).send('Permintaan tidak valid');
   console.error(err);
   res.status(500).send('Terjadi kesalahan server');
 });

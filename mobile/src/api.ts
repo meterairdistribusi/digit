@@ -1,14 +1,25 @@
 // Klien API Toko Digital (/api/v1). Murni TypeScript tanpa dependensi React Native,
 // sehingga bisa diuji langsung terhadap backend asli (lihat test/mobile-api.test.js di root repo).
 
+export type Cover = { c1: string; c2: string; title: string; subtitle: string };
+
 export type Product = {
   id: number;
   name: string;
   category: string;
   description: string;
   price: number;
+  compare_at: number | null;
+  discount_percent: number;
+  badge: string;
+  featured: boolean;
+  sold: number;
+  /** URL gambar; null → aplikasi menggambar sampul dari `cover` (SVG tidak bisa ditampilkan di native) */
+  image: string | null;
+  cover: Cover;
   orderable: boolean;
   in_stock: boolean;
+  low_stock: boolean;
   max_qty: number;
 };
 
@@ -32,7 +43,12 @@ export type User = { id: number; email: string; name: string; phone: string };
 export type Session = { token: string; user: User };
 export type LegalMeta = { name: string; title: string; updated: string };
 export type LegalDoc = LegalMeta & { markdown: string };
-export type AppConfig = { store_name: string; whatsapp: string; payments_enabled: boolean };
+export type AppConfig = {
+  store_name: string;
+  whatsapp: string;
+  payments_enabled: boolean;
+  banner: { title: string; text: string; code: string };
+};
 
 export class ApiError extends Error {
   status: number;

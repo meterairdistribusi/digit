@@ -379,3 +379,159 @@ test('push: daftar token, terkirim saat pesanan siap & refund, tanpa isi produk,
   await c.del('/api/v1/me', { token: t2, json: { password: 'rahasia123' } });
   assert.ok(!store().db.prepare('SELECT 1 FROM push_tokens WHERE token = ?').get(GOOD));
 });
+
+// ---------- Tampilan baru: gambar, promo, dasbor, stok, etalase ----------
+const PNG = 'data:image/png;base64,' + Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]).toString('base64');
+const form = (o) => ({ name: 'Produk Gambar', category: 'Uji', price: '20000', description: 'd', active: '1', ...o });
+
+test('unggah gambar produk: valid diterima & disajikan aman; berkas berbahaya/oversize/URL jahat ditolak', async () => {
+  const c = client();
+  const ok = await owner.post('/admin/products', { form: form({ image_data: PNG, compare_at: '30000', badge: 'Promo', featured: '1' }) });
+  assert.strictEqual(ok.status, 302);
+  const id = Number(/products\/(\d+)/.exec(ok.loc)[1]);
+  const p = store().getProduct(id);
+  assert.match(p.image, /^\/uploads\/[a-f0-9]{20}\.png$/);
+  const res = await fetch(base + p.image);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.headers.get('content-type'), 'image/png');
+  assert.strictEqual(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(res.headers.get('cache-control'), /immutable/);
+
+  // HTML yang menyamar sebagai PNG
+  const html = 'data:image/png;base64,' + Buffer.from('<html><script>alert(1)</script>'.padEnd(64, ' ')).toString('base64');
+  const bad = await owner.post('/admin/products', { form: form({ name: 'Palsu', image_data: html }) });
+  assert.strictEqual(bad.status, 400);
+  assert.match(bad.text, /bukan gambar/);
+  assert.ok(!store().db.prepare("SELECT 1 FROM products WHERE name = 'Palsu'").get(), 'produk tidak boleh dibuat bila gambar ditolak');
+  // SVG & tipe lain ditolak (bisa memuat skrip)
+  assert.strictEqual((await owner.post('/admin/products', { form: form({ name: 'Svg', image_data: 'data:image/svg+xml;base64,' + Buffer.from('<svg onload=alert(1)>').toString('base64') }) })).status, 400);
+  // terlalu besar
+  const big = 'data:image/png;base64,' + Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(800 * 1024)]).toString('base64');
+  const huge = await owner.post('/admin/products', { form: form({ name: 'Besar', image_data: big }) });
+  assert.strictEqual(huge.status, 400); assert.match(huge.text, /terlalu besar/);
+  const monster = 'data:image/png;base64,' + Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1300 * 1024)]).toString('base64');
+  assert.strictEqual((await owner.post('/admin/products', { form: form({ name: 'Raksasa', image_data: monster }) })).status, 413);
+  assert.strictEqual((await client().post('/track', { form: { id: 'x', contact: 'y'.repeat(150 * 1024) } })).status, 413, 'form publik tetap dibatasi 100kb');
+  // unggahan realistis (~250 KB hasil kompres browser) harus lolos
+  const real = 'data:image/png;base64,' + Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(250 * 1024, 7)]).toString('base64');
+  assert.strictEqual((await owner.post('/admin/products', { form: form({ name: 'Realistis', image_data: real }) })).status, 302);
+  // URL: hanya https
+  for (const u of ['javascript:alert(1)', 'http://x.test/a.png', 'data:text/html,hi', '//x.test/a.png']) {
+    assert.strictEqual((await owner.post('/admin/products', { form: form({ name: 'U' + u.length, image_url: u }) })).status, 400, u);
+  }
+  assert.strictEqual((await owner.post(`/admin/products/${id}`, { form: form({ image_url: 'https://cdn.contoh.id/a.jpg' }) })).status, 302);
+  assert.strictEqual(store().getProduct(id).image, 'https://cdn.contoh.id/a.jpg');
+  // hapus gambar → sampul otomatis
+  await owner.post(`/admin/products/${id}`, { form: form({ image_remove: '1', image_url: '' }) });
+  assert.strictEqual(store().getProduct(id).image, null);
+  // staf boleh mengelola produk; anonim tidak
+  assert.strictEqual((await client().post('/admin/products', { form: form({ name: 'Anon' }) })).status, 302);
+  assert.ok(!store().db.prepare("SELECT 1 FROM products WHERE name = 'Anon'").get());
+  // path traversal pada /uploads
+  assert.strictEqual((await c.get('/uploads/..%2f..%2fshop.db')).status, 404);
+  assert.strictEqual((await c.get('/uploads/.secret')).status, 404);
+});
+
+test('promo: harga coret, diskon %, label, unggulan tampil di toko & API; input tak valid dibersihkan', async () => {
+  const c = client();
+  const mk = async (o) => Number(/products\/(\d+)/.exec((await owner.post('/admin/products', { form: form(o) })).loc)[1]);
+  const promo = await mk({ name: 'Promo Besar', price: '15000', compare_at: '25000', badge: 'Terlaris', featured: '1' });
+  const noPromo = await mk({ name: 'Tanpa Promo', price: '15000', compare_at: '9000', badge: '<img src=x onerror=alert(1)>' }); // coret < jual & label tak dikenal
+  const pa = store().getProduct(promo), pb = store().getProduct(noPromo);
+  assert.deepStrictEqual([pa.compare_at, pa.badge, pa.featured], [25000, 'Terlaris', 1]);
+  assert.deepStrictEqual([pb.compare_at, pb.badge], [null, ''], 'harga coret ≤ harga jual & label di luar daftar ditolak');
+  await owner.post(`/admin/products/${promo}/stock`, { form: { items: 'a|b\nc|d' } });
+  await owner.post(`/admin/products/${noPromo}/stock`, { form: { items: 'a|b' } });
+  const api = (await c.get('/api/v1/products')).data;
+  const ap = api.find((x) => x.id === promo), bp = api.find((x) => x.id === noPromo);
+  assert.deepStrictEqual([ap.compare_at, ap.discount_percent, ap.badge, ap.featured], [25000, 40, 'Terlaris', true]);
+  assert.deepStrictEqual([bp.compare_at, bp.discount_percent], [null, 0]);
+  assert.ok(ap.cover.c1 && ap.cover.title === 'Promo' && 'image' in ap);
+  assert.ok(api.findIndex((x) => x.id === promo) < api.findIndex((x) => x.id === noPromo), 'unggulan tampil lebih dulu');
+  const home = (await c.get('/')).text;
+  assert.match(home, /-40%/); assert.match(home, /Rp25\.000/); assert.match(home, /tag-label">Terlaris/);
+  assert.ok(home.includes(`/img/p/${promo}.svg`));
+  const page = (await c.get('/product/' + promo)).text;
+  assert.match(page, /Hemat 40%/); assert.match(page, /id="buy"/); assert.match(page, /data-price="15000"/);
+});
+
+test('sampul otomatis: SVG aman, nama berbahaya di-escape; nama produk berbahaya tak menjadi XSS di toko/admin', async () => {
+  const c = client();
+  const evil = '<script>alert(1)</script>"\'';
+  const id = Number(/products\/(\d+)/.exec((await owner.post('/admin/products', { form: form({ name: evil, category: '<b>x</b>', description: '<img src=x onerror=alert(1)>' }) })).loc)[1]);
+  await owner.post(`/admin/products/${id}/stock`, { form: { items: 'x|y' } });
+  const svgRes = await fetch(base + `/img/p/${id}.svg`);
+  assert.strictEqual(svgRes.headers.get('content-type').split(';')[0], 'image/svg+xml');
+  assert.match(svgRes.headers.get('content-security-policy'), /default-src 'none'/);
+  const svg = await svgRes.text();
+  assert.ok(!svg.includes('<script>') && svg.includes('&lt;script&gt;'));
+  assert.strictEqual((await fetch(base + '/img/p/99999.svg')).status, 404);
+  for (const [who, path] of [[c, '/'], [c, '/product/' + id], [owner, '/admin/products'], [owner, '/admin/stock'], [owner, '/admin/products/' + id], [owner, '/admin']]) {
+    const t = (await who.get(path)).text;
+    assert.ok(!t.includes('<script>alert(1)') && !t.includes('<img src=x onerror') && !t.includes('<b>x</b>'), 'XSS di ' + path);
+  }
+});
+
+test('dasbor, stok, dan pesanan admin: tampil, menghitung, dan hak akses', async () => {
+  const dash = await owner.get('/admin');
+  assert.strictEqual(dash.status, 200);
+  assert.match(dash.text, /Pendapatan per hari/); assert.match(dash.text, /Perlu perhatian/); assert.match(dash.text, /<svg class="chart"/);
+  assert.match(dash.text, /Dasbor/); assert.match(dash.text, /nav-item active/);
+  assert.strictEqual((await owner.get('/admin?days=7')).status, 200);
+  assert.strictEqual((await owner.get('/admin?days=abc')).status, 200);
+  assert.strictEqual((await staff.get('/admin')).status, 200);
+  assert.ok(!(await staff.get('/admin')).text.includes('/admin/settings'), 'menu Pengaturan disembunyikan untuk Staf');
+  assert.ok((await owner.get('/admin')).text.includes('/admin/settings'));
+  assert.strictEqual((await client().get('/admin')).status, 302);
+
+  const d = store().dashboard(30);
+  assert.strictEqual(d.daily.length, 30);
+  assert.ok(d.cur.orders >= 1 && d.cur.revenue > 0, 'ada pesanan lunas dari tes sebelumnya');
+  assert.strictEqual(d.cur.revenue, store().db.prepare("SELECT SUM(amount) s FROM orders WHERE status LIKE 'paid%' AND date(created_at) >= date('now','-29 days')").get().s);
+
+  // stok
+  const st = await owner.get('/admin/stock');
+  assert.strictEqual(st.status, 200); assert.match(st.text, /Stok produk/);
+  const pid = store().db.prepare("SELECT id FROM products WHERE name = 'Akun Uji'").get().id;
+  const before = store().stockOverview().find((p) => p.id === pid).available;
+  const add = await owner.post(`/admin/products/${pid}/stock?back=stock`, { form: { items: 'q1|p\nq2|p\n\n  \nq3|p' } });
+  assert.match(add.loc, /^\/admin\/stock\?m=/);
+  assert.strictEqual(store().stockOverview().find((p) => p.id === pid).available, before + 3, 'baris kosong diabaikan');
+  for (const f of ['low', 'habis', 'via']) assert.strictEqual((await owner.get('/admin/stock?filter=' + f)).status, 200);
+
+  // pesanan: filter, flag, halaman, pencarian; XSS di kueri
+  for (const q of ['?status=paid', '?status=paid_nostock', '?flag=refund_failed', '?flag=dup', '?flag=unknown', '?flag=ngawur', '?page=999', '?q=%27%20OR%201%3D1--', '?q=%3Cscript%3E']) {
+    const r = await owner.get('/admin/orders' + q);
+    assert.strictEqual(r.status, 200, q);
+    assert.ok(!r.text.includes('<script>alert') && !r.text.includes("<script>'"), q);
+  }
+  const lowN = store().db.prepare("SELECT COUNT(*) c FROM orders").get().c;
+  assert.match((await owner.get('/admin/orders')).text, new RegExp(`${lowN} pesanan`));
+});
+
+test('etalase: pencarian, kategori, produk habis tanpa tombol beli, kupon langsung', async () => {
+  const c = client();
+  const sold = Number(/products\/(\d+)/.exec((await owner.post('/admin/products', { form: form({ name: 'Barang Habis XYZ', category: 'Uji' }) })).loc)[1]);
+  const ready = Number(/products\/(\d+)/.exec((await owner.post('/admin/products', { form: form({ name: 'Barang Siap XYZ', category: 'Uji', price: '12000' }) })).loc)[1]);
+  await owner.post(`/admin/products/${ready}/stock`, { form: { items: 'k|l' } });
+  const q = (await c.get('/?q=xyz')).text;
+  assert.ok(q.includes('Barang Siap XYZ') && q.includes('Barang Habis XYZ'));
+  assert.ok(!q.includes('Netflix Premium'), 'pencarian menyaring');
+  assert.match((await c.get('/?q=tidakadaproduknya')).text, /Produk tidak ditemukan/);
+  assert.match((await c.get('/?c=Uji')).text, /Barang Siap XYZ/);
+  const soldPage = (await c.get('/product/' + sold)).text;
+  assert.ok(!soldPage.includes('id="buy"') && /sedang habis/i.test(soldPage));
+  const readyPage = (await c.get('/product/' + ready)).text;
+  assert.ok(readyPage.includes('id="buy"') && readyPage.includes('sticky-buy'));
+  // checkout tamu dari halaman produk dengan kupon, lalu masuk ke halaman pesanan dengan langkah progres
+  store().saveCoupon({ code: 'TOKO20', type: 'percent', value: 20, minAmount: 0, maxUses: 0, expiresAt: null });
+  assert.deepStrictEqual((await c.get(`/coupon/check?product_id=${ready}&qty=1&code=toko20`)).data, { ok: true, discount: 2400, total: 9600 });
+  const co = await c.post('/checkout', { form: { product_id: ready, name: 'Tamu', contact: 'tamu@uji.id', qty: 1, coupon: 'TOKO20' } });
+  assert.strictEqual(co.status, 302);
+  const page = (await c.get(co.loc.replace(base, ''))).text;
+  assert.match(page, /class="stepper"/); assert.match(page, /Rp9\.600/); assert.match(page, /Kupon TOKO20/);
+  // produk tak aktif tidak tampil & tidak bisa dibeli
+  await owner.post(`/admin/products/${ready}/toggle`);
+  assert.strictEqual((await c.get('/product/' + ready)).status, 404);
+  assert.ok(!(await c.get('/')).text.includes('Barang Siap XYZ'));
+});

@@ -7,6 +7,7 @@ import { rupiah } from '../api';
 import { useAuth } from '../auth';
 import { usePush } from '../push';
 import { Badge, Button, Card, ErrorText, Field, H1, Loading, Muted, Screen, useLoad } from '../components/ui';
+import { ProductImage } from '../components/ProductImage';
 import type { Nav, RootStackParamList } from '../navigation';
 import { createStyles, space, useTheme } from '../theme';
 
@@ -64,16 +65,27 @@ export default function ProductScreen() {
 
   return (
     <Screen>
+      <View style={{ borderRadius: 18, overflow: 'hidden' }}>
+        <ProductImage product={p} />
+        {p.discount_percent || p.badge ? (
+          <View style={s.tags} pointerEvents="none">
+            {p.discount_percent ? <Text style={s.disc}>-{p.discount_percent}%</Text> : <View />}
+            {p.badge ? <Text style={s.label}>{p.badge}</Text> : null}
+          </View>
+        ) : null}
+      </View>
       <Badge text={p.category} tone="brand" />
       <H1>{p.name}</H1>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <Text style={s.bigPrice}>{rupiah(p.price)}</Text>
+        {p.compare_at ? <Text style={s.was}>{rupiah(p.compare_at)}</Text> : null}
+        {p.discount_percent ? <Badge text={`Hemat ${p.discount_percent}%`} tone="bad" /> : null}
+      </View>
+      {p.sold >= 5 || p.low_stock ? <Muted>{p.low_stock ? 'Stok terbatas' : ''}{p.low_stock && p.sold >= 5 ? ' · ' : ''}{p.sold >= 5 ? `${p.sold}+ terjual` : ''}</Muted> : null}
       <Text style={s.desc}>{p.description}</Text>
       <Card>
         <View style={s.row}>
-          <Text style={s.label}>Harga</Text>
-          <Text style={s.value}>{rupiah(p.price)}</Text>
-        </View>
-        <View style={s.row}>
-          <Text style={s.label}>Jumlah</Text>
+          <Text style={s.qtyLabel}>Jumlah</Text>
           <View style={s.stepper}>
             <Pressable accessibilityRole="button" accessibilityLabel="Kurangi jumlah" onPress={() => setQty(Math.max(1, qty - 1))} style={s.stepBtn}><Text style={s.stepText}>−</Text></Pressable>
             <Text style={s.qty} accessibilityLabel={`Jumlah ${qty}`}>{qty}</Text>
@@ -109,7 +121,12 @@ export default function ProductScreen() {
 const useS = createStyles((colors) => ({
   desc: { fontSize: 15, lineHeight: 22, color: colors.fg },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: space.md },
-  label: { color: colors.muted, fontSize: 15 },
+  qtyLabel: { color: colors.muted, fontSize: 15 },
+  bigPrice: { color: colors.fg, fontSize: 30, fontWeight: '800' },
+  was: { color: colors.muted, fontSize: 16, textDecorationLine: 'line-through' },
+  tags: { position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', justifyContent: 'space-between' },
+  disc: { backgroundColor: '#e11d48', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)', color: '#fff', fontWeight: '800', fontSize: 13, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 99, overflow: 'hidden' },
+  label: { backgroundColor: 'rgba(255,255,255,0.95)', color: '#3b2fd1', fontWeight: '800', fontSize: 12.5, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 99, overflow: 'hidden' },
   value: { fontSize: 16, fontWeight: '700', color: colors.fg },
   total: { fontSize: 18, fontWeight: '800', color: colors.fg },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 14 },

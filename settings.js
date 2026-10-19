@@ -17,6 +17,16 @@ const GROUPS = [
     ],
   },
   {
+    id: 'tampilan', label: 'Tampilan toko',
+    help: 'Banner promo di beranda toko dan aplikasi. Kosongkan judul untuk memakai teks bawaan.',
+    fields: [
+      F('BANNER_TITLE', 'Judul banner', { help: 'mis. Diskon 20% semua produk streaming' }),
+      F('BANNER_TEXT', 'Teks banner'),
+      F('BANNER_CODE', 'Kode kupon yang ditampilkan (opsional)'),
+      F('LOW_STOCK', 'Batas "stok menipis"', { help: 'Angka. Produk dengan stok ≤ angka ini ditandai menipis (default 5).' }),
+    ],
+  },
+  {
     id: 'midtrans', label: 'Midtrans', kind: 'gateway',
     help: 'Daftarkan webhook: {BASE_URL}/pay/midtrans/notify',
     fields: [S('MIDTRANS_SERVER_KEY', 'Server key'), F('MIDTRANS_IS_PRODUCTION', 'Mode produksi', { hidden: true })],
